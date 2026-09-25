@@ -24,9 +24,8 @@ Besides Python 3.10+ on Linux or Windows, you need either an IAR installation
 or an already-running backend to connect to. The installation is the
 directory with `common/bin` under it (for example IAR Embedded Workbench for
 Arm), and it needs to ship `CSpyServer2`; the backend is then started for
-you. The project and options features also need the `IarServiceLauncher` that
-full Embedded Workbench installations have. To debug a program you also need
-a launch configuration (see below).
+you. The project and options features also need `IarServiceLauncher`.
+To debug a program you also need a launch configuration (see below).
 
 The only dependency is `thriftpy2`; the Thrift IDL ships with the package.
 
@@ -228,5 +227,5 @@ python examples/scripts/live_demo.py --iar-path /opt/iar/ewarm
 
 The live tests run the bundled firmware (`examples/firmware`) on the
 simulator. CI (`.github/workflows/ci.yml`) runs the unit tests on Python
-3.10-3.12, builds the distribution, and runs the live tests, example tests
-and demo against the public cxarm toolchain.
+3.10-3.12 and builds the distribution. It does not run the live tests, since
+it has no IAR license: run them locally before merging.
