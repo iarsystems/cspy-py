@@ -10,6 +10,12 @@ mirror the MCP tools (`debugger_go_and_wait_for_core_state` is
 `client.debugger.go_and_wait`, `breakpoints_set_on_ule` is
 `client.breakpoints.add`, and so on).
 
+Install it with
+
+```sh
+pip install "iar-cspy @ git+https://github.com/iarsystems/cspy-py"
+```
+
 ## The model
 
 - A **backend** is the set of IAR processes hosting the services:

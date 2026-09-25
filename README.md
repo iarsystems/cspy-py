@@ -9,8 +9,11 @@ is built on.
 [![CI](https://github.com/iarsystems/cspy-py/actions/workflows/ci.yml/badge.svg)](https://github.com/iarsystems/cspy-py/actions/workflows/ci.yml)
 
 ```sh
-pip install .        # from a checkout of this repository
+pip install "iar-cspy @ git+https://github.com/iarsystems/cspy-py"
 ```
+
+Add `@<branch, tag or commit>` after the repository URL to pin a version.
+From a clone of this repository, use `pip install .`.
 
 The only dependency is `thriftpy2`; the Thrift IDL ships with the package.
 You need Python 3.10+ and either an IAR installation (the directory with

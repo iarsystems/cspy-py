@@ -28,8 +28,8 @@ Read the documentation before writing code. Do not guess method names.
 ## Setup
 
 - Check the package: `python -c "import iar_cspy"`. If that fails, install it
-  from a checkout of cspy-py (`pip install <checkout>`). Ask
-  the user where the checkout is instead of cloning it yourself.
+  from GitHub, into the project's virtual environment if it has one:
+  `pip install "iar-cspy @ git+https://github.com/iarsystems/cspy-py"`.
 - You need a backend. That is either an IAR installation path (the directory
   with `common/bin`; `IAR_INSTALL_PATH` may already be set) or the service
   registry port of a running IDE or backend. If neither is known, ask the user.
