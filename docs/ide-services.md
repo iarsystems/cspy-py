@@ -220,11 +220,10 @@ prepended and points at a path that does not exist. Generated manifests
 therefore use a relative path. This is also why passing a shipped manifest by
 absolute path works fine: the `libraryName` inside it is relative.
 
-**Stopping a debug session can take the backend down.** Unrelated to this
-wiring, but visible here too: `stopSession` can hit a backend assertion and end
-the process. Managed mode restarts it, and because the IDE services live in the
-IarServiceLauncher rather than in CSpyServer2, a project or options session
-survives a debugger restart.
+**Stopping a debug session ends CSpyServer2.** Managed mode stops a session
+by having CSpyServer2 exit (`Debugger.exit()`), and starts a fresh one for the
+next session. Because the IDE services live in the IarServiceLauncher rather
+than in CSpyServer2, a project or options session survives that.
 
 **A stopped CSpyServer2 leaves its services in the shared registry.** When a
 CSpyServer2 that joined the launcher's registry exits, its registrations

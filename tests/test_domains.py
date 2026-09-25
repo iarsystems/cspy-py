@@ -56,6 +56,15 @@ def test_breakpoint_listing_and_removal(session):
     assert rpc.args("breakpoints", "removeBreakpoint") == [(1,), (2,)]
 
 
+def test_clear_reports_breakpoints_the_backend_kept(session):
+    client, rpc = session
+    rpc.on("breakpoints", "getBreakpoints", [{"id": 1, "ule": "main"}, {"id": 2, "ule": "f"}])
+    rpc.on("breakpoints", "removeBreakpoint", lambda id: id != 2)  # false, not an exception
+    with pytest.raises(CSpyError, match=r"did not remove these breakpoints: 2 \(f\)"):
+        client.breakpoints.clear()
+    assert rpc.args("breakpoints", "removeBreakpoint") == [(1,), (2,)]
+
+
 def test_breakpoints_take_the_struct_or_its_id(session):
     client, rpc = session
     bp = rpc.struct("breakpoints", "getBreakpoint", id=7, ule="main", valid=True)
@@ -188,6 +197,59 @@ def test_terminal_buffers_output_and_queues_input(fake):
 
     client.terminal.output(clear=True)
     assert client.terminal.text == ""
+
+
+def test_a_stdin_read_waits_for_input(fake):
+    # Like a console: the target's read is answered once there is input, not
+    # with an empty (end-of-file) answer because none was queued yet.
+    client, _ = fake
+    handler, terminal = client.terminal.server.handler, client.terminal
+    result = []
+    reader = threading.Thread(target=lambda: result.append(handler.requestInputBinary(1)))
+    reader.start()
+    assert terminal.wait_for_input_request(timeout=5) is True
+    assert terminal.waiting_for_input is True and result == []
+    terminal.send("xy")
+    reader.join(5)
+    assert result == [b"x"] and terminal.waiting_for_input is False
+    assert handler.requestInputBinary(4) == b"y"  # queued input needs no wait
+
+
+def test_cancel_input_answers_a_waiting_read_with_end_of_file(fake):
+    client, _ = fake
+    handler, terminal = client.terminal.server.handler, client.terminal
+    result = []
+    reader = threading.Thread(target=lambda: result.append(handler.requestInput(8)))
+    reader.start()
+    assert terminal.wait_for_input_request(timeout=5)
+    terminal.cancel_input()
+    reader.join(5)
+    assert result == [""]
+    assert terminal.wait_for_input_request(timeout=0.05) is False
+
+
+def test_ending_the_session_releases_a_waiting_read(session):
+    client, rpc = session
+    rpc.on("debugger", "stopSession")
+    reader = threading.Thread(target=client.terminal.server.handler.requestInputBinary, args=(1,))
+    reader.start()
+    assert client.terminal.wait_for_input_request(timeout=5)
+    client.debugger.stop_session()
+    reader.join(5)
+    assert not reader.is_alive()
+
+
+def test_request_input_takes_queued_input_without_waiting(fake):
+    client, rpc = fake
+    client.terminal.server.ensure(client.idl.service("libsupport.thrift", "LibSupportService2"))
+    try:
+        client.terminal.send("abc")
+        assert client.terminal.request_input_binary(2) == b"ab"
+        assert client.terminal.request_input(8) == "c"
+        assert client.terminal.request_input_binary(1) == b""  # nothing queued: no wait
+        assert rpc.calls == []  # its own queue, not a round trip that would block
+    finally:
+        client.terminal.server.stop()
 
 
 def test_terminal_waits(fake):

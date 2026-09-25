@@ -29,12 +29,10 @@ class _LibSupportHandler:
         self._terminal = terminal
 
     def requestInputBinary(self, length: int) -> bytes:
-        t = self._terminal
-        n = max(0, int(length))
-        with t._lock:
-            chunk = bytes(t._input[:n])
-            del t._input[:n]
-        log.debug("libsupport requestInputBinary(len=%d) -> %d bytes", n, len(chunk))
+        # The target is reading stdin: like a console, answer once there is
+        # input. An empty answer is end-of-file to the program.
+        chunk = self._terminal._read_input(max(0, int(length)))
+        log.debug("libsupport requestInputBinary(len=%d) -> %d bytes", int(length), len(chunk))
         return chunk
 
     def requestInput(self, length: int) -> str:
@@ -67,7 +65,11 @@ class Terminal:
     """The target program's console (``client.terminal``).
 
     Output is captured as soon as a session is configured; :meth:`send`
-    queues input for the program's next stdin read.
+    queues input for the program's stdin. A read of stdin waits for input,
+    as it would at a console (the IDE and the VS Code extension do the same):
+    :attr:`waiting_for_input` tells when the program is blocked on one, and
+    :meth:`cancel_input` answers it with end-of-file, as ending the session
+    does. Halting the target leaves the read pending.
     """
 
     def __init__(self, client: Client) -> None:
@@ -79,6 +81,8 @@ class Terminal:
         self._input = bytearray()
         self._exit_code: int | None = None
         self._asserts: deque[dict[str, str]] = deque(maxlen=100)
+        self._readers = 0  # backend stdin reads waiting for input
+        self._cancelled = 0  # bumped by cancel_input to release them
         self.server = CallbackServer("libsupport", _LibSupportHandler(self), client.config.libsupport_client_timeout_ms)
 
     def _append_output(self, data: bytes) -> None:
@@ -146,13 +150,49 @@ class Terminal:
         self._asserts.clear()
 
     def send(self, text: str | bytes, newline: bool = False) -> int:
-        """Queue input for the program; returns the number of bytes now queued."""
+        """Queue input for the program; returns the number of bytes now queued.
+
+        A stdin read that is waiting for input gets it right away.
+        """
         data = text if isinstance(text, bytes) else text.encode("utf-8")
         if newline:
             data += b"\n"
-        with self._lock:
+        with self._changed:
             self._input.extend(data)
+            self._changed.notify_all()
             return len(self._input)
+
+    @property
+    def waiting_for_input(self) -> bool:
+        """Whether the program is blocked reading stdin, with no input queued."""
+        with self._lock:
+            return self._readers > 0
+
+    def wait_for_input_request(self, timeout: float = 30.0) -> bool:
+        """Wait until the program blocks reading stdin; False on timeout."""
+        with self._changed:
+            return self._changed.wait_for(lambda: self._readers > 0, timeout=max(0.0, timeout))
+
+    def cancel_input(self) -> None:
+        """Answer the stdin reads that are waiting for input with end-of-file."""
+        with self._changed:
+            self._cancelled += 1
+            self._changed.notify_all()
+
+    def _read_input(self, length: int) -> bytes:
+        """Up to ``length`` queued bytes; waits for input (or :meth:`cancel_input`) if there is none."""
+        with self._changed:
+            if length > 0 and not self._input:
+                cancelled = self._cancelled
+                self._readers += 1
+                self._changed.notify_all()
+                try:
+                    self._changed.wait_for(lambda: self._input or self._cancelled != cancelled)
+                finally:
+                    self._readers -= 1
+            chunk = bytes(self._input[:length])
+            del self._input[:length]
+            return chunk
 
     def forget_exit_code(self) -> None:
         with self._lock:
@@ -163,11 +203,23 @@ class Terminal:
             self._input.clear()
 
     def request_input(self, length: int) -> str:
-        """Call the registered libsupport service's requestInput (a round trip)."""
-        return str(self._client.call("libsupport", "requestInput", int(length)))
+        """Take up to ``length`` queued input bytes as text, as a stdin read would, without waiting."""
+        return self.request_input_binary(length).decode("utf-8", errors="replace")
 
     def request_input_binary(self, length: int) -> bytes:
-        return bytes(self._client.call("libsupport", "requestInputBinary", int(length)))
+        """Take up to ``length`` queued input bytes, as a stdin read would, without waiting.
+
+        When this process hosts ``libsupport`` (it does once a session has
+        been configured), that is its own queue. Otherwise this calls the
+        registered service's requestInputBinary.
+        """
+        if not self.server.started:
+            return bytes(self._client.call("libsupport", "requestInputBinary", int(length)))
+        n = max(0, int(length))
+        with self._lock:
+            chunk = bytes(self._input[:n])
+            del self._input[:n]
+        return chunk
 
     def ensure_registered(self) -> dict[str, Any]:
         """Host and register the ``libsupport`` service so output is captured."""

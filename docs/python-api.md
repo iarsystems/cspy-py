@@ -140,7 +140,15 @@ with client.debugger.session("launch.json") as dbg:
 ```
 
 `client.terminal.send("input\n")` feeds the program's stdin, and
-`wait_for_exit()` waits for a program that calls `exit()`.
+`wait_for_exit()` waits for a program that calls `exit()`. A stdin read waits
+for input as it would at a console, so the input can also be sent once the
+program asks for it:
+
+```python
+dbg.go()
+assert client.terminal.wait_for_input_request(timeout=10)
+client.terminal.send("42\n")
+```
 
 ### Build and debug an Embedded Workbench project
 

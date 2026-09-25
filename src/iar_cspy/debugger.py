@@ -18,8 +18,10 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 from ._session import requires_session
 from ._thrift import to_plain
+from .backend import MULTICORE_OPTION
 from .context import ContextLike, context_ref
 from .errors import CSpyError, SessionError, WaitTimeout, cspy_exception_info, describe, error_entry, with_context
+from .events import FATAL_ERROR_NOTES
 from .launch import LaunchConfig
 from .types import CleanupResult, CoreState, Register, RegisterSnapshot, StartResult, StopResult, WaitResult
 
@@ -37,6 +39,19 @@ PRE_SESSION_METHODS = frozenset(
 DEFAULT_TIMEOUT = 10.0
 
 _DECIMAL = re.compile(r"[-+]?\d+")
+
+
+def core_count(launch_configuration: Any) -> int:
+    """The core count a launch configuration's driver options ask for (1 unless multicore)."""
+    if isinstance(launch_configuration, dict):
+        options = launch_configuration.get("driverOptions")
+    else:
+        options = getattr(launch_configuration, "driverOptions", None)
+    for option in options or []:
+        text = str(option).strip()
+        if text.startswith(MULTICORE_OPTION) and text[len(MULTICORE_OPTION):].isdigit():
+            return max(1, int(text[len(MULTICORE_OPTION):]))
+    return 1
 
 
 def _core_state(value: Any) -> CoreState | int:
@@ -71,6 +86,9 @@ class Debugger:
         self._generation = 0
         #: The :class:`StartResult` of the last :meth:`configure_and_start`.
         self.last_start: StartResult | None = None
+        #: What ended the session, when the backend reported a fatal error.
+        self._fatal_error: str | None = None
+        client.events.subscribe(self._on_event)
 
     @property
     def client(self) -> Client:
@@ -107,6 +125,9 @@ class Debugger:
 
     def require_started(self, what: str) -> None:
         """Raise SessionError unless this client has a started session."""
+        fatal = self._fatal_error
+        if self._lost_session() == "fatal":
+            raise self._fatal_session_error(fatal)
         if not self.started:
             raise SessionError(
                 f"{what} requires an active debug session. Start one with "
@@ -126,30 +147,44 @@ class Debugger:
             raise SessionError("attach() found no debug session: the backend reports the target offline.")
         self.set_state(configured=True, started=True)
 
-    def _lost_session(self) -> bool:
-        """Whether the managed CSpyServer2 the session ran in has been replaced.
+    def _lost_session(self) -> str | None:
+        """Why the session is gone, if it is: "replaced" or "fatal".
 
         A managed CSpyServer2 that crashed or stopped responding is restarted
-        on the next call, and the new process has no session. Resets the
-        bookkeeping when that happened.
+        on the next call, and the new process has no session ("replaced").
+        A fatal error the backend reported ends the session too ("fatal"), as
+        in the IDE. Resets the bookkeeping when either happened.
         """
         with self._lock:
             active = self._configured or self._started
-            lost = active and self._generation != self._client.backend.debugger_generation
-        if lost:
+            if not active:
+                return None
+            if self._generation != self._client.backend.debugger_generation:
+                reason = "replaced"
+            elif self._fatal_error is not None:
+                reason = "fatal"
+            else:
+                return None
+        if reason == "replaced":
             log.warning("The managed CSpyServer2 was replaced; the debug session is gone.")
-            self._reset_state()
-        return lost
+        else:
+            log.warning("The backend reported a fatal error; the debug session is over: %s", self._fatal_error)
+        self._reset_state()
+        return reason
 
     def check_backend(self, method: str | None = None) -> None:
-        """Raise SessionError if the session's CSpyServer2 was replaced under it.
+        """Raise SessionError if the session's CSpyServer2 was replaced, or the session died.
 
         :meth:`Client.call` runs this for every debug-session service call,
         after the backend has been brought up. ``method`` is the RPC; the
         :data:`PRE_SESSION_METHODS` are let through.
         """
-        if not self._lost_session() or method in PRE_SESSION_METHODS:
+        fatal = self._fatal_error
+        reason = self._lost_session()
+        if reason is None or method in PRE_SESSION_METHODS:
             return
+        if reason == "fatal":
+            raise self._fatal_session_error(fatal)
         diagnostics = self._client.backend.debugger_process.last_process_diagnostics
         raise SessionError(
             "The managed CSpyServer2 process exited or stopped responding and was replaced by a "
@@ -158,9 +193,33 @@ class Debugger:
             diagnostics=diagnostics,
         )
 
+    def _on_event(self, kind: str, event: Any) -> None:
+        # Runs on the event handler's thread: only take note here.
+        if kind != "debug" or getattr(event, "note", None) not in FATAL_ERROR_NOTES:
+            return
+        message = self._describe_fatal(event)
+        with self._lock:
+            if self._configured or self._started:
+                self._fatal_error = message
+
+    def _describe_fatal(self, event: Any) -> str:
+        # The backend logs what went wrong just before it posts the event.
+        logged = [str(getattr(e, "text", "")).strip() for kind, e in self._client.events.recent() if kind == "log"]
+        detail = next((text for text in reversed(logged) if "fatal" in text.lower()), None)
+        return detail or str(getattr(event, "descr", "") or "kDkFatalError")
+
+    def _fatal_session_error(self, message: str | None) -> SessionError:
+        return SessionError(
+            f"The backend reported a fatal error, which ends the debug session: "
+            f"{message or 'kDkFatalError'}. Call stop_session() and start a new session."
+        )
+
     def _reset_state(self) -> None:
         self.set_state(configured=False, started=False)
         self._client.clear_session_caches()
+        # A backend read of target stdin that is still waiting would block
+        # the next session's kernel thread.
+        self._client.terminal.cancel_input()
 
     # -- information -----------------------------------------------------------
 
@@ -230,8 +289,15 @@ class Debugger:
         a launch.json (first configuration). This does not stop a previous
         session first: some backends assert when stopSession is called in
         certain states. Use :meth:`configure_and_start` for a clean handoff.
+
+        For a multicore configuration (``--multicore_nr_of_cores=N``) a
+        managed CSpyServer2 started for another core count is replaced first:
+        it needs the count on its command line.
         """
         config = LaunchConfig.coerce(launch)
+        if "driverOptions" in config:
+            # Before resolving, so that it resolves in a process with the right arguments.
+            self._client.backend.use_core_count(core_count(config))
         self._configure(lambda: self._call("resolveLaunchConfiguration", config.to_json()))
 
     def configure_resolved(self, launch_configuration: Any) -> None:
@@ -242,15 +308,28 @@ class Debugger:
         self._configure(lambda: launch_configuration)
 
     def _configure(self, resolve: Any) -> None:
+        cores = 1
+        with self._lock:
+            self._fatal_error = None
         try:
             self._client.ensure_callbacks()
-            self._call("configureSession", resolve())
+            resolved = resolve()
+            cores = core_count(resolved)
+            if self._client.backend.use_core_count(cores):
+                self._client.ensure_callbacks()  # a new process, maybe with a registry of its own
+            self._call("configureSession", resolved)
         except Exception as exc:  # noqa: BLE001
             self._reset_state()
+            hint = ""
+            if cores > 1 and self._client.backend.mode != "managed":
+                hint = (
+                    f" This is a {cores}-core configuration: CSpyServer2 must have been started with "
+                    f"{MULTICORE_OPTION}{cores} on its command line, or configuring fails."
+                )
             raise with_context(
                 exc,
                 "Configuring the debug session failed. Local lifecycle state was reset; retry "
-                f"configure -> start once the backend is healthy. Backend error: {exc}",
+                f"configure -> start once the backend is healthy.{hint} Backend error: {exc}",
             ) from exc
         self._client.clear_session_caches()
         self.set_state(configured=True, started=False)
@@ -345,15 +424,18 @@ class Debugger:
     def stop_session(self) -> StopResult:
         """Stop the session; idempotent.
 
-        A ``DkStop`` "failed to suspend" error is treated as success when the
-        cores turn out to be stopped already. In managed mode the CSpyServer2
-        process is shut down, so the next session gets a fresh one. The local
-        state is reset even when stopping fails.
+        In managed mode the CSpyServer2 process is asked to exit
+        (``Debugger.exit()``, which ends the session the way cspy.thrift
+        prescribes), so the next session gets a fresh one. In standalone mode
+        the session is stopped with ``stopSession``; a ``DkStop`` "failed to
+        suspend" error is treated as success when the cores turn out to be
+        stopped already. The local state is reset even when stopping fails.
         """
-        managed = self._client.backend.mode == "managed"
-        state = self.state
+        active = self.state["configured"] or self.state["started"]
+        # A target blocked reading stdin would hold up the stop.
+        self._client.terminal.cancel_input()
 
-        if not state["configured"] and not state["started"]:
+        if self._client.backend.mode == "managed":
             shutdown_error: Exception | None = None
             try:
                 self._client.backend.restart_debugger()
@@ -365,43 +447,35 @@ class Debugger:
                     "stop_session completed the local stop reset, but the managed backend "
                     f"shutdown failed: {shutdown_error}"
                 ) from shutdown_error
-            return StopResult(already_stopped=True, backend_restarted=managed)
+            return StopResult(already_stopped=not active, backend_restarted=True)
 
-        result = StopResult(backend_restarted=managed)
-        stop_error: Exception | None = None
+        if not active:
+            self._reset_state()
+            return StopResult(already_stopped=True)
+
+        result = StopResult()
         try:
             self._call("stopSession")
         except Exception as exc:  # noqa: BLE001
-            stop_error = exc
             idempotent, details = self.benign_stop_error(exc)
-            if idempotent:
-                result.stop_idempotent_recovered = True
-                result.stop_idempotent_details = details
-                stop_error = None
-
-        shutdown_error = None
-        try:
-            self._client.backend.restart_debugger()
-        except Exception as exc:  # noqa: BLE001
-            shutdown_error = exc
-
+            if not idempotent:
+                self._reset_state()
+                raise with_context(
+                    exc,
+                    "stop_session failed. Local lifecycle state was still reset to stopped. "
+                    f"stopSession error: {describe(exc)}",
+                ) from exc
+            result.stop_idempotent_recovered = True
+            result.stop_idempotent_details = details
         self._reset_state()
-
-        if stop_error is not None or shutdown_error is not None:
-            parts = ["stop_session failed. Local lifecycle state was still reset to stopped."]
-            if stop_error is not None:
-                parts.append(f"stopSession error: {describe(stop_error)}")
-            if shutdown_error is not None:
-                parts.append(f"managed shutdown error: {shutdown_error}")
-            cause = stop_error if stop_error is not None else shutdown_error
-            raise with_context(cause, " ".join(parts)) from cause
         return result
 
     def cleanup(self, reset_target: bool = False) -> CleanupResult:
         """Force a known-good baseline; never raises.
 
         Best effort: optionally reset the target, stop the session, clear
-        local session state and buffers, and shut down the managed CSpyServer2.
+        local session state and buffers, and shut down the managed CSpyServer2
+        (which ends its session).
         """
         errors: list[dict[str, Any]] = []
         before = self.state
@@ -424,7 +498,9 @@ class Debugger:
             except Exception as exc:  # noqa: BLE001
                 failed("reset failed", exc)
 
-        if active:
+        self._client.terminal.cancel_input()
+        # In managed mode, the process's Debugger.exit() below ends the session.
+        if active and self._client.backend.mode != "managed":
             try:
                 self._call("stopSession")
             except Exception as exc:  # noqa: BLE001
@@ -530,7 +606,11 @@ class Debugger:
 
     @requires_session
     def halt(self) -> None:
-        """Stop execution (``Debugger.stop``)."""
+        """Stop execution (``Debugger.stop``).
+
+        A stdin read that is waiting for input stays pending: input sent
+        later still reaches it once the target runs again.
+        """
         self._call("stop")
 
     @requires_session
@@ -639,7 +719,15 @@ class Debugger:
         deadline = start + max(0.0, float(timeout))
         action()
         if int(state) == CoreState.STOPPED and events.receiving:
-            if events.wait_for_stop(after=mark, timeout=max(0.0, deadline - time.perf_counter())) is None:
+            event = events.wait_for_stop(after=mark, timeout=max(0.0, deadline - time.perf_counter()))
+            if event is not None and getattr(event, "note", None) in FATAL_ERROR_NOTES:
+                # Recorded here as well: the listener may not have run yet.
+                message = self._describe_fatal(event)
+                with self._lock:
+                    self._fatal_error = message
+                self._lost_session()
+                raise self._fatal_session_error(message)
+            if event is None:
                 return self._poll_state(
                     state, core=core, start=start, deadline=start, timeout=timeout,
                     poll_interval=0, check=check, stop_event_missing=True,

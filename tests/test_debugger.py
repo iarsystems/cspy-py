@@ -48,6 +48,39 @@ def test_configure_failure_resets_state(fake):
     assert client.debugger.state == {"configured": False, "started": False}
 
 
+def test_a_multicore_configuration_gets_a_cspyserver2_for_its_core_count(monkeypatch):
+    client, rpc = fake_client(Config(mode="managed"))
+    counts = []
+    monkeypatch.setattr(client.backend, "use_core_count", lambda n: counts.append(n) or len(counts) == 2)
+    callbacks = []
+    client.ensure_callbacks = lambda: callbacks.append(True)
+    resolved = {"driverOptions": ["--cpu=Cortex-M3", "--multicore_nr_of_cores=2"]}
+    rpc.on("debugger", "resolveLaunchConfiguration", resolved).on("debugger", "configureSession")
+
+    client.debugger.configure({**LAUNCH, "driverOptions": ["--multicore_nr_of_cores=2"]})
+    # From the launch before resolving, then from what was resolved; the
+    # second one replaced the process, so the callbacks were registered again.
+    assert counts == [2, 2] and len(callbacks) == 2
+    assert rpc.args("debugger", "configureSession") == [(resolved,)]
+
+
+def test_core_count_of_a_launch_configuration():
+    from iar_cspy.debugger import core_count
+
+    assert core_count({"driverOptions": ["--cpu=Cortex-M3"]}) == 1
+    assert core_count({"driverOptions": ["--multicore_nr_of_cores=4"]}) == 4
+    assert core_count(SimpleNamespace(driverOptions=["--multicore_nr_of_cores=2"])) == 2
+    assert core_count({}) == 1
+
+
+def test_a_failed_multicore_configure_explains_the_command_line(fake):
+    client, rpc = fake
+    rpc.on("debugger", "resolveLaunchConfiguration", {"driverOptions": ["--multicore_nr_of_cores=2"]})
+    rpc.on("debugger", "configureSession", cspy_exception(7, "DkConfigure", "failed to configure debugger driver"))
+    with pytest.raises(BackendError, match="started with --multicore_nr_of_cores=2 on its command line"):
+        client.debugger.configure(LAUNCH)
+
+
 def test_start_requires_configure(fake):
     client, _ = fake
     with pytest.raises(SessionError):
@@ -185,8 +218,21 @@ def test_stop_session_in_managed_mode_restarts_the_backend(monkeypatch):
     restarts = []
     monkeypatch.setattr(client.backend, "restart_debugger", lambda: restarts.append(True))
     started(client)
-    assert client.debugger.stop_session().backend_restarted is True
+    result = client.debugger.stop_session()
+    assert (result.backend_restarted, result.already_stopped) == (True, False)
     assert restarts == [True]
+    # The process's Debugger.exit() ends the session: no deprecated stopSession.
+    assert "stopSession" not in rpc.methods()
+    assert client.debugger.state == {"configured": False, "started": False}
+
+
+def test_cleanup_in_managed_mode_leaves_stopping_to_the_process_exit(monkeypatch):
+    client, rpc = fake_client(Config(mode="managed"))
+    restarts = []
+    monkeypatch.setattr(client.backend, "restart_debugger", lambda: restarts.append(True))
+    started(client)
+    assert client.debugger.cleanup().ok is True
+    assert restarts == [True] and rpc.calls == []
 
 
 def test_cleanup_resets_everything_and_reports_failures(fake, monkeypatch):
@@ -255,6 +301,7 @@ def test_go_and_wait(session):
 
 
 STARTED, STOPPED = SimpleNamespace(note=1), SimpleNamespace(note=0)
+INSPECTED, FATAL = SimpleNamespace(note=4), SimpleNamespace(note=13, descr="kDkFatalError", params=[])
 
 
 def post_later(client, delay, *events):
@@ -305,6 +352,52 @@ def test_steps_wait_for_the_stop(session):
     rpc.on("debugger", "getCoreState", 0)
     assert client.debugger.step_over(timeout=2).ok
     assert client.debugger.step_over(wait=False) is None
+
+
+def test_a_stop_waits_for_the_inspection_context_to_follow(session):
+    # The backend posts the stop before it has moved its inspection context
+    # to the new location; values read in between could be stale.
+    client, rpc = session
+    client.events.receiving = True
+    rpc.on("debugger", "stepOver", lambda: post_later(client, 0, STARTED, STOPPED) or post_later(client, 0.2, INSPECTED))
+    rpc.on("debugger", "getCoreState", 0)
+    started_at = time.perf_counter()
+    assert client.debugger.step_over(timeout=2).ok
+    assert 0.2 <= time.perf_counter() - started_at < 0.45  # until the context moved, not the 0.5 s bound
+
+
+def test_a_stop_without_the_inspection_event_waits_only_the_settle_bound(fake):
+    client, _ = fake
+    handler = client.events.server.handler
+    mark = client.events.mark()
+    handler.postDebugEvent(STARTED)
+    handler.postDebugEvent(STOPPED)
+    started_at = time.perf_counter()
+    assert client.events.wait_for_stop(after=mark, timeout=5, settle=0.1) is STOPPED
+    assert 0.1 <= time.perf_counter() - started_at < 1
+
+
+def test_a_fatal_error_ends_the_wait_and_the_session(session):
+    client, rpc = session
+    client.events.receiving = True
+    rpc.on("debugger", "go", lambda: post_later(client, 0.05, STARTED, FATAL)).on("debugger", "getCoreState", 1)
+    client.events.server.handler.postLogEvent(SimpleNamespace(text="Fatal error: probe lost   Session aborted!"))
+    started_at = time.perf_counter()
+    with pytest.raises(SessionError, match="fatal error.*probe lost"):
+        client.debugger.go_and_wait(timeout=5)
+    assert time.perf_counter() - started_at < 2  # not the whole timeout
+    assert client.debugger.state == {"configured": False, "started": False}
+
+
+def test_a_fatal_error_event_fails_the_next_session_call(session):
+    client, rpc = session
+    rpc.on("breakpoints", "getBreakpoints", [])
+    client.events.server.handler.postDebugEvent(FATAL)
+    with pytest.raises(SessionError, match="fatal error, which ends the debug session: kDkFatalError"):
+        client.breakpoints.all()
+    with pytest.raises(SessionError, match="requires an active debug session"):
+        client.breakpoints.all()  # reported once; after that there is just no session
+    assert rpc.calls == []
 
 
 def test_run_control_methods(session):

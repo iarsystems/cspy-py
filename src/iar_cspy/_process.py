@@ -21,7 +21,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import TextIO
+from typing import Callable, TextIO
 
 PORT_PATTERN = re.compile(r"Service registry running on local socket on port:\s*(\d+)")
 
@@ -39,6 +39,10 @@ class ManagedProcess:
 
     ``command`` is called at every (re)start with the extra context the caller
     needs (for CSpyServer2: the registry port to join, if any).
+
+    ``request_exit``, if given, asks the running program to exit on its own
+    (for CSpyServer2: ``Debugger.exit()``); shutting down then waits up to
+    ``exit_timeout_s`` for that before terminating the process.
     """
 
     def __init__(
@@ -49,12 +53,16 @@ class ManagedProcess:
         start_timeout_ms: int = 20000,
         restart_on_failure: bool = True,
         terminate_timeout_s: float = 3.0,
+        request_exit: Callable[[], bool] | None = None,
+        exit_timeout_s: float = 15.0,
     ) -> None:
         self.name = name
         self.host = host
         self.start_timeout_ms = start_timeout_ms
         self.restart_on_failure = restart_on_failure
         self.terminate_timeout_s = terminate_timeout_s
+        self.request_exit = request_exit
+        self.exit_timeout_s = exit_timeout_s
 
         self.lock = threading.RLock()
         self.process: subprocess.Popen[bytes] | None = None
@@ -223,9 +231,22 @@ class ManagedProcess:
             cmd = " ".join(self.last_cmd) if self.last_cmd else "<unknown>"
             log_path = str(self.log_path) if self.log_path else "<none>"
 
+            if proc.poll() is None and self.request_exit is not None and self.registry_port is not None:
+                exit_requested = False
+                try:
+                    exit_requested = self.request_exit()
+                except Exception:  # noqa: BLE001 - terminated below instead
+                    pass
+                if exit_requested:
+                    try:
+                        proc.wait(timeout=self.exit_timeout_s)
+                    except subprocess.TimeoutExpired:
+                        pass
+
             if proc.poll() is None:
                 # Both programs handle SIGTERM; IarServiceLauncher uses it to
                 # shut its services down in reverse order before exiting.
+                # (On Windows this is TerminateProcess, hence request_exit.)
                 try:
                     proc.terminate()
                     proc.wait(timeout=self.terminate_timeout_s)

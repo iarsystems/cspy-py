@@ -33,12 +33,16 @@ tracks the tool-surface items; the numbers are kept from there.
 - `debugger_get_cycle_counter` returned -821365371 on hardware (i32 truncation
   of the 64-bit CYCLECOUNTER). Return unsigned 64-bit.
 
-17. [ ] Surface the known stopSession backend crash better
+17. [~] Surface the known stopSession backend crash better
 - Every `stopSession` in `-standalone -sockets` mode hits a known backend
   assertion and aborts the process; managed mode recovers but the error
   payload embeds the same ~30-line stack trace twice (~30 KB).
   Deduplicate/truncate, and tag it as a known backend issue with
   "retry configure_and_start once" as the recovery hint.
+- Managed mode no longer calls `stopSession`: it ends the session with
+  `Debugger.exit()`, as cspy.thrift prescribes and the VS Code extension
+  does. Open: the standalone-mode path (a process we must not exit), and
+  whether the assertion still occurs (not reproduced with EWARM 10.10).
 
 21. [ ] Host a headless `frontend` service
 - Without an IDE, `getStack`, `getContextInfo`, source lookup and disassembly

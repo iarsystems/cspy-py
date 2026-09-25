@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from iar_cspy import CoreState
+from iar_cspy import CoreState, LaunchConfig
 
 pytestmark = pytest.mark.live
 
@@ -53,6 +53,28 @@ def test_memory_registers_and_terminal(cspy_client, cspy_session):
 def test_registry_lists_the_debugger_services(cspy_client, cspy_session):
     names = {entry["name"] for entry in cspy_client.registry.services()}
     assert {"debugger", "breakpoints", "debugger.memory", "libsupport", "debugger.eventhandler"} <= names
+
+
+def test_stopping_a_managed_session_lets_cspyserver2_exit(cspy_client, cspy_config, cspy_launch):
+    if cspy_config.mode != "managed":
+        pytest.skip("Only a managed backend is shut down by stop_session")
+    cspy_client.debugger.configure_and_start(cspy_launch)
+    process = cspy_client.backend.debugger_process.process
+    cspy_client.debugger.stop_session()
+    assert process.returncode == 0  # it exited through Debugger.exit(), it was not terminated
+
+
+def test_a_multicore_simulator_session(cspy_client, cspy_config, cspy_launch):
+    if cspy_config.mode != "managed" or cspy_launch.get("driver") != "Simulator":
+        pytest.skip("Needs a managed backend and a simulator launch configuration")
+    launch = LaunchConfig(cspy_launch)
+    options = [o for o in launch.get("driverOptions", []) if not o.startswith("--multicore_nr_of_cores=")]
+    launch["driverOptions"] = [*options, "--multicore_nr_of_cores=2"]
+    # CSpyServer2 needs the count on its command line; the backend restarts it with it.
+    with cspy_client.debugger.session(launch) as dbg:
+        assert dbg.core_count() == 2
+        assert "--multicore_nr_of_cores=2" in cspy_client.backend.debugger_process.last_cmd
+        assert dbg.step_over(timeout=10).ok
 
 
 @pytest.fixture()

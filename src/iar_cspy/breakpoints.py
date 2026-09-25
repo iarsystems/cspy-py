@@ -139,9 +139,16 @@ class Breakpoints:
         return bool(self._call("removeBreakpoint", breakpoint_id(bp)))
 
     def clear(self) -> None:
-        """Remove every breakpoint."""
-        for bp in self.all():
-            self.remove(bp)
+        """Remove every breakpoint.
+
+        ``removeBreakpoint`` reports a breakpoint it could not remove by
+        returning false, not by raising; this raises CSpyError naming those
+        (after trying all of them).
+        """
+        kept = [bp for bp in self.all() if not self.remove(bp)]
+        if kept:
+            names = ", ".join(f"{breakpoint_id(bp)} ({(to_plain(bp) or {}).get('ule', '')})" for bp in kept)
+            raise CSpyError(f"The backend did not remove these breakpoints: {names}")
 
     @requires_session
     def recently_hit(self) -> list[Any]:

@@ -168,6 +168,73 @@ def test_without_a_launcher_cspyserver2_owns_the_registry(tmp_path):
         backend.shutdown()
 
 
+def test_shutdown_asks_the_program_to_exit_before_terminating(tmp_path):
+    exe = program(tmp_path, "CSpyServer2")
+    asked = []
+
+    def request_exit():
+        # Stands in for Debugger.exit(): the program goes away by itself.
+        asked.append(True)
+        proc.process.send_signal(signal.SIGUSR1)
+        return True
+
+    proc = ManagedProcess("CSpyServer2", start_timeout_ms=10000, request_exit=request_exit, exit_timeout_s=5)
+    proc.ensure(exe, [])
+    first = proc.process
+    proc.shutdown()
+    assert asked == [True]
+    assert first.returncode == -signal.SIGUSR1  # not terminated
+
+
+def test_shutdown_terminates_a_program_that_does_not_exit(tmp_path):
+    proc = ManagedProcess("CSpyServer2", start_timeout_ms=10000, request_exit=lambda: True, exit_timeout_s=0.2)
+    proc.ensure(program(tmp_path, "CSpyServer2"), [])
+    first = proc.process
+    proc.shutdown()
+    assert first.returncode == -signal.SIGTERM
+
+
+def test_shutdown_terminates_when_the_exit_request_fails(tmp_path):
+    def request_exit():
+        raise ConnectionRefusedError
+
+    proc = ManagedProcess("CSpyServer2", start_timeout_ms=10000, request_exit=request_exit, exit_timeout_s=5)
+    proc.ensure(program(tmp_path, "CSpyServer2"), [])
+    first = proc.process
+    started = time.monotonic()
+    proc.shutdown()
+    assert first.returncode == -signal.SIGTERM
+    assert time.monotonic() - started < 4  # no wait for an exit that was never asked for
+
+
+def test_a_multicore_session_restarts_cspyserver2_with_the_core_count(tmp_path, monkeypatch):
+    backend = managed(tmp_path, program(tmp_path, "CSpyServer2"), program(tmp_path, "IarServiceLauncher"))
+    monkeypatch.setattr(backend, "_prune_stale_registrations", lambda port: None)
+    try:
+        backend.registry_endpoint()
+        assert not any(arg.startswith("--multicore_nr_of_cores") for arg in backend.debugger_process.last_cmd)
+
+        assert backend.use_core_count(2) is True  # started for 1 core: replaced
+        assert not backend.debugger_process.running
+        backend.registry_endpoint()
+        assert backend.debugger_process.last_cmd[-1] == "--multicore_nr_of_cores=2"
+        assert backend.use_core_count(2) is False
+        assert backend.debugger_generation == 2
+    finally:
+        backend.shutdown()
+
+
+def test_cspy_args_carry_the_core_count():
+    backend = Backend(Config(mode="managed", cspy_args=("-standalone", "-sockets")))
+    assert backend.use_core_count(3) is False  # nothing running yet
+    assert backend.cspy_args(None) == ["-standalone", "-sockets", "--multicore_nr_of_cores=3"]
+    assert backend.cspy_args(4711) == ["-sockets", "-registry", "4711", "--multicore_nr_of_cores=3"]
+    given = Backend(Config(mode="managed", cspy_args=("-standalone", "--multicore_nr_of_cores=2")))
+    given.use_core_count(3)
+    assert given.cspy_args(None) == ["-standalone", "--multicore_nr_of_cores=2"]  # the user's own choice
+    assert Backend(Config(mode="standalone", registry_port=1)).use_core_count(2) is False
+
+
 def test_prune_stale_registrations_removes_unreachable_endpoints(tmp_path, monkeypatch):
     import iar_cspy.backend as backend_module
 

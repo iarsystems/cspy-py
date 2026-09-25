@@ -67,7 +67,7 @@ client = cspy.connect(51926)          # registry port; registry_host= for anothe
 | `client.context` | `stack`, `depth`, `info`, `locals`, `parameters`, `visible_symbols`, `lookup`. All take `context=Context.frame(n)` and the like. |
 | `client.memory` | `read`, `write`, `read_u32`, `write_u32`, at an address (with `zone=`), a `Location`, or the `ExprValue` of a variable. |
 | `client.disassembly`, `client.source` | `range(start, end)`; `ranges(address)`. |
-| `client.terminal` | The target's console via libsupport: `text`, `output()`, `send(input)`, `wait_for_text("READY")`, `wait_for_exit()`. |
+| `client.terminal` | The target's console via libsupport: `text`, `output()`, `send(input)`, `wait_for_input_request()`, `wait_for_text("READY")`, `wait_for_exit()`. |
 | `client.events` | Debug events from the backend: `recent()`, `subscribe(fn)`. |
 | `client.listwindows` | Trace and other list windows: `services()`, `window(name).rows()`, `trace(name).set_enabled()`. |
 | `client.project` | Embedded Workbench projects: `load`, `status`, `build`, `files`, `launch_configuration`, `start_debugging`. |

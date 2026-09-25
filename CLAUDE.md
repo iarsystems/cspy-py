@@ -67,14 +67,19 @@ Important behavior:
 - The registry endpoint is not the debugger endpoint itself.
 - The event handler and libsupport services are hosted by this process and
   registered on configure/start.
-- One session per CSpyServer2 process: managed mode restarts it on stop. A
+- One session per CSpyServer2 process: on stop, managed mode has it exit
+  (`Debugger.exit()`, not the deprecated `stopSession`) and starts a fresh one. A
   replaced CSpyServer2 (`Backend.debugger_generation`) ends the session:
-  `Client.call` raises `SessionError` for calls that needed it.
+  `Client.call` raises `SessionError` for calls that needed it, as it does
+  after the backend posts `kDkFatalError`.
 - Session-dependent API methods raise `SessionError` without a started
   session; `debugger.attach()` adopts one another frontend started.
 - `go_and_wait`/`run_to`/the steps wait for a target-started then a
   target-stopped event after the action. `runToULE` returns early, and the
-  core reads "stopped" before it starts.
+  core reads "stopped" before it starts. They then wait (at most 0.5 s) for
+  `kDkInspectionContextChanged`, which the backend posts after the stop.
+- Target stdin reads (libsupport `requestInputBinary`) wait for
+  `terminal.send()`, as at a console; ending the session releases them.
 
 ## Breakpoint API Guidance (Important)
 `client.breakpoints.add(ule, access)` is the primary way to create breakpoints
@@ -90,7 +95,10 @@ and watchpoints.
 ## Known Backend Issues
 See `docs/backend-notes.md`. In short:
 - Connection resets (`WinError 10054`) and the backend exiting around
-  configure/start/stopSession; stopSession can assert in `-standalone -sockets` mode.
+  configure/start/stopSession; stopSession can assert in `-standalone -sockets` mode
+  (managed mode ends sessions with `Debugger.exit()` instead, as cspy.thrift says).
+- Multicore sessions need `--multicore_nr_of_cores=N` on the CSpyServer2 command
+  line too (managed mode adds it).
 - Headless: `ContextManager.getStack`/`getContextInfo` fail with "No such
   service: frontend" (no IDE frontend).
 - Flash loading and license (`kDcLicenseViolation`) failures during start.

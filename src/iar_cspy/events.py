@@ -21,6 +21,15 @@ EVENTHANDLER_SERVICE = "debugger.eventhandler"
 #: ``DkNotifyConstant`` values of interest.
 TARGET_STOPPED = 0
 TARGET_STARTED = 1
+INSPECTION_CONTEXT_CHANGED = 4
+FATAL_ERROR = 13
+SILENT_FATAL_ERROR = 19
+#: A fatal error, reported to the user or not: the debug session is over.
+FATAL_ERROR_NOTES = frozenset({FATAL_ERROR, SILENT_FATAL_ERROR})
+
+#: How long, in seconds, a stop waits for the backend to move its inspection
+#: context to the new location (see :meth:`Events.wait_for_stop`).
+STOP_SETTLE_TIMEOUT = 0.5
 
 Listener = Callable[[str, Any], None]
 
@@ -108,28 +117,51 @@ class Events:
                     return None
                 self._posted.wait(remaining)
 
-    def wait_for_stop(self, *, after: int, timeout: float) -> Any | None:
+    def wait_for_stop(self, *, after: int, timeout: float, settle: float = STOP_SETTLE_TIMEOUT) -> Any | None:
         """The first target-stopped event that follows a target-started one, both after ``after``.
 
         A stop event posted before the target started running again belongs
         to an earlier halt or step, so it does not count. Returns the event,
-        or None on timeout.
+        or None on timeout. A fatal error ends the wait early: its event is
+        returned instead (see :data:`FATAL_ERROR_NOTES`).
+
+        The backend posts the stop before it has moved its inspection context
+        (and the variable windows) to the new location, so this then waits
+        up to ``settle`` seconds more for the inspection-context-changed event
+        that follows; values read right after the stop could be stale.
         """
         deadline = time.monotonic() + max(0.0, timeout)
         with self._posted:
             while True:
                 started = False
+                stop: tuple[int, Any] | None = None
                 for seq, kind, event in self._recent:
                     if seq <= after or kind != "debug":
                         continue
                     note = getattr(event, "note", None)
+                    if note in FATAL_ERROR_NOTES:
+                        return event
                     if note == TARGET_STARTED:
                         started = True
                     elif note == TARGET_STOPPED and started:
-                        return event
+                        stop = (seq, event)
+                        break
+                if stop is not None:
+                    break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
+                self._posted.wait(remaining)
+
+            stop_seq, stop_event = stop
+            settled_by = time.monotonic() + max(0.0, settle)
+            while True:
+                for seq, kind, event in self._recent:
+                    if seq > stop_seq and _is_inspection_change(kind, event):
+                        return stop_event
+                remaining = settled_by - time.monotonic()
+                if remaining <= 0:
+                    return stop_event
                 self._posted.wait(remaining)
 
     def _post(self, kind: str, event: Any) -> None:
@@ -174,3 +206,9 @@ class Events:
             self._client.registry.register(EVENTHANDLER_SERVICE, host, port)
             self.receiving = True
             return {"ok": True, "status": "registered", "host": host, "port": port}
+
+
+def _is_inspection_change(kind: str, event: Any) -> bool:
+    if kind == "inspection_context_changed":
+        return True
+    return kind == "debug" and getattr(event, "note", None) == INSPECTION_CONTEXT_CHANGED

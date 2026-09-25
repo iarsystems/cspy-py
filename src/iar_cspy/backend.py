@@ -30,6 +30,13 @@ from ._process import ManagedProcess, is_reachable
 from .config import Config
 from .errors import CSpyError
 
+#: The driver option (and CSpyServer2 argument) giving a multicore session's core count.
+MULTICORE_OPTION = "--multicore_nr_of_cores="
+
+#: How long a managed CSpyServer2 gets to exit after ``Debugger.exit()``
+#: before it is terminated (the VS Code extension waits as long).
+DEBUGGER_EXIT_TIMEOUT_S = 15.0
+
 
 class Backend:
     """Owns (managed mode) or points at (standalone mode) the service registry.
@@ -47,6 +54,8 @@ class Backend:
             start_timeout_ms=self.config.cspy_start_timeout_ms,
             restart_on_failure=self.config.cspy_restart_on_failure,
             terminate_timeout_s=3.0,
+            request_exit=self._request_debugger_exit,
+            exit_timeout_s=DEBUGGER_EXIT_TIMEOUT_S,
         )
         self.launcher_process = ManagedProcess(
             "IarServiceLauncher",
@@ -62,6 +71,9 @@ class Backend:
         #: Incremented whenever a new CSpyServer2 process is started: a debug
         #: session does not survive into the next one.
         self.debugger_generation = 0
+        #: Cores the managed CSpyServer2 is started for; see :meth:`use_core_count`.
+        self.debugger_cores = 1
+        self._running_cores = 1
         atexit.register(self.shutdown)
 
     @classmethod
@@ -153,9 +165,11 @@ class Backend:
             if join_port is not None and not self.debugger_process.healthy():
                 self._prune_stale_registrations(join_port)
             before = self.debugger_process.process
+            cores = self.debugger_cores
             port = self.debugger_process.ensure(exe, self.cspy_args(join_port))
             if self.debugger_process.process is not before:
                 self.debugger_generation += 1
+                self._running_cores = cores
             if join_port is not None and port != join_port:
                 self.debugger_process.shutdown()
                 raise RuntimeError(
@@ -190,11 +204,64 @@ class Backend:
 
         When an IarServiceLauncher owns the registry, CSpyServer2 must not
         start one of its own: it joins with ``-registry <port>``, so debugger
-        and IDE services end up in a single registry.
+        and IDE services end up in a single registry. A multicore session
+        needs the core count on the command line as well (see
+        :meth:`use_core_count`).
         """
         if join_registry_port is None:
-            return list(self.config.cspy_args)
-        return ["-sockets", "-registry", str(int(join_registry_port))]
+            args = list(self.config.cspy_args)
+        else:
+            args = ["-sockets", "-registry", str(int(join_registry_port))]
+        if self.debugger_cores > 1 and not any(arg.startswith(MULTICORE_OPTION) for arg in args):
+            args.append(f"{MULTICORE_OPTION}{self.debugger_cores}")
+        return args
+
+    def use_core_count(self, cores: int) -> bool:
+        """Have the managed CSpyServer2 run with ``cores`` cores; True if it was restarted for it.
+
+        CSpyServer2 takes the core count of a multicore session
+        (``--multicore_nr_of_cores=N`` in the driver options) on its command
+        line, not only from the session configuration: without it,
+        configuring the session fails ("failed to configure debugger driver").
+        A running process started for a different count is shut down, so the
+        next use starts one with the right arguments. Does nothing in
+        standalone mode.
+        """
+        cores = max(1, int(cores))
+        if self.mode != "managed":
+            return False
+        with self._lock:
+            self.debugger_cores = cores
+            if self.debugger_process.running and self._running_cores != cores:
+                self.debugger_process.shutdown()
+                return True
+        return False
+
+    def _request_debugger_exit(self) -> bool:
+        """Ask the managed CSpyServer2 to exit through ``Debugger.exit()``; False if it could not be asked.
+
+        That is the shutdown cspy.thrift prescribes: it ends the session
+        (``stopSession`` is deprecated for clients) and lets the driver
+        disconnect from the target, where terminating the process would not.
+        """
+        port = self.debugger_process.registry_port
+        if port is None:
+            return False
+        idl = _thrift.Idl(self.config.thrift_file, self.config.include_dirs)
+        registry = make_client(idl.registry.CSpyServiceRegistry, self.registry_host, int(port), timeout=2000)
+        try:
+            location = registry.waitForService(self.config.registry_service_name, 1000)
+        finally:
+            registry.close()
+        timeout_ms = int(DEBUGGER_EXIT_TIMEOUT_S * 1000)
+        debugger = make_client(idl.service(None, "Debugger"), location.host, int(location.port), timeout=timeout_ms)
+        try:
+            debugger.exit()
+        except Exception:  # noqa: BLE001 - the process may drop the connection as it exits
+            pass
+        finally:
+            debugger.close()
+        return True
 
     # -- lifecycle -------------------------------------------------------------
 
