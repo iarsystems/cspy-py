@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ._session import requires_session
 from .context import ContextLike, context_ref
-from .memory import location
+from .memory import Address, location
 
 if TYPE_CHECKING:
     from .client import Client
@@ -14,15 +15,18 @@ if TYPE_CHECKING:
 class Disassembly:
     """Instructions for an address range (``client.disassembly``)."""
 
+    _api_name = "disassembly"
+
     def __init__(self, client: Client) -> None:
         self._client = client
 
+    @requires_session
     def range(
         self,
-        start: int,
-        end: int,
+        start: Address,
+        end: Address,
         *,
-        zone: int = 0,
+        zone: int | None = None,
         end_zone: int | None = None,
         context: ContextLike = None,
     ) -> list[Any]:
@@ -35,9 +39,12 @@ class Disassembly:
 class SourceLookup:
     """Map code addresses to source (``client.source``)."""
 
+    _api_name = "source"
+
     def __init__(self, client: Client) -> None:
         self._client = client
 
-    def ranges(self, address: int, *, zone: int = 0) -> list[Any]:
+    @requires_session
+    def ranges(self, address: Address, *, zone: int | None = None) -> list[Any]:
         """``SourceRange`` structs for the code at ``address``."""
         return self._client.call("sourcelookup", "getSourceRanges", location(self._client, address, zone))

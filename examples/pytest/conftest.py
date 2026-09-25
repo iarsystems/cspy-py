@@ -1,6 +1,6 @@
-"""Firmware tests with the iar_cspy pytest plugin.
+"""Firmware tests with the iar_cspy pytest plugin, which pytest loads by itself.
 
-    pytest examples/pytest --cspy-iar-path /opt/iar/ewarm
+    pytest examples/pytest --cspy-iar-path=/opt/iar/ewarm
 
 Without a --cspy-* option (or IAR_INSTALL_PATH) the tests are skipped.
 """
@@ -10,8 +10,6 @@ from pathlib import Path
 import pytest
 
 from iar_cspy import LaunchConfig
-
-pytest_plugins = ["iar_cspy.pytest_plugin"]
 
 
 @pytest.fixture

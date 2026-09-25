@@ -176,6 +176,23 @@ def cspy_exception_info(exc: BaseException) -> CSpyExceptionInfo | None:
     return CSpyExceptionInfo(int(match.group(1)), match.group(2), match.group(3), match.group(4))
 
 
+def with_context(exc: BaseException, message: str) -> CSpyError:
+    """A new error saying ``message``, keeping what callers branch on.
+
+    The class (:class:`BackendError`, :class:`SessionError`), the decoded
+    backend result and the diagnostics carry over from ``exc``, so
+    ``except BackendError`` and :func:`classify` see the failure the backend
+    reported. Raise it ``from exc``.
+    """
+    diagnostics = getattr(exc, "diagnostics", "") or ""
+    info = cspy_exception_info(exc)
+    if info is not None:
+        return BackendError(message, info, diagnostics=diagnostics)
+    if isinstance(exc, SessionError):
+        return SessionError(message, diagnostics=diagnostics)
+    return CSpyError(message, diagnostics=diagnostics)
+
+
 def describe(exc: BaseException) -> str:
     """One-line human-readable rendering, decoding CSpyExceptions."""
     info = cspy_exception_info(exc)
@@ -273,7 +290,7 @@ def classify(
     (``backend_diagnostics``, ``service_launcher_diagnostics``); it is only
     consulted when the failure looks like a backend fault.
     """
-    text = describe(exc)
+    text = _summary(exc)
     low = text.lower()
     extra: dict[str, str] = {}
     if diagnostics is not None and looks_like_backend_fault(text):
@@ -284,15 +301,11 @@ def classify(
         out.update(extra)
         return out
 
-    if "timed out" in low or "timeout" in low:
-        return entry(code="TIMEOUT", category="timeout", message=text, retryable=True)
-    if "10054" in low or "connection reset" in low:
-        return entry(code="TRANSPORT_CONNECTION_RESET", category="transport", message=text, retryable=True)
-    if "connection refused" in low or "actively refused" in low or "could not connect" in low:
-        return entry(code="TRANSPORT_CONNECTION_REFUSED", category="transport", message=text, retryable=True)
     if isinstance(exc, SessionError) or "requires an active debug session" in low:
         return entry(code="SESSION_NOT_STARTED", category="lifecycle", message=text, retryable=False)
 
+    # A result code the backend reported is the most specific answer; the
+    # text checks below would also match words in its message.
     info = cspy_exception_info(exc)
     if info is not None:
         dc_name = info.code_name or "UnknownDcResult"
@@ -318,4 +331,24 @@ def classify(
             details={"cspy": info.to_dict()},
         )
 
+    if "timed out" in low or "timeout" in low:
+        return entry(code="TIMEOUT", category="timeout", message=text, retryable=True)
+    if "10054" in low or "connection reset" in low:
+        return entry(code="TRANSPORT_CONNECTION_RESET", category="transport", message=text, retryable=True)
+    if "connection refused" in low or "actively refused" in low or "could not connect" in low:
+        return entry(code="TRANSPORT_CONNECTION_REFUSED", category="transport", message=text, retryable=True)
+
     return entry(code=fallback_code, category="unknown", message=text, retryable=False)
+
+
+def _summary(exc: BaseException) -> str:
+    """:func:`describe` without the attached backend output.
+
+    The output (process ids, log lines) is context, not the failure: a log
+    line saying "timeout" must not turn a license error into a TIMEOUT.
+    """
+    text = describe(exc)
+    diagnostics = getattr(exc, "diagnostics", "") or ""
+    if diagnostics:
+        text = text.replace(diagnostics, "").strip()
+    return text

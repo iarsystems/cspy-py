@@ -108,6 +108,30 @@ class Events:
                     return None
                 self._posted.wait(remaining)
 
+    def wait_for_stop(self, *, after: int, timeout: float) -> Any | None:
+        """The first target-stopped event that follows a target-started one, both after ``after``.
+
+        A stop event posted before the target started running again belongs
+        to an earlier halt or step, so it does not count. Returns the event,
+        or None on timeout.
+        """
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._posted:
+            while True:
+                started = False
+                for seq, kind, event in self._recent:
+                    if seq <= after or kind != "debug":
+                        continue
+                    note = getattr(event, "note", None)
+                    if note == TARGET_STARTED:
+                        started = True
+                    elif note == TARGET_STOPPED and started:
+                        return event
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._posted.wait(remaining)
+
     def _post(self, kind: str, event: Any) -> None:
         with self._posted:
             self._seq += 1
@@ -140,7 +164,7 @@ class Events:
             if existing is not None and is_reachable(existing["host"], existing["port"], timeout_s=0.5):
                 self.receiving = (existing["host"], existing["port"]) == (self.server.host, self.server.port)
                 return {
-                        "ok": True,
+                    "ok": True,
                     "status": "already-registered",
                     "host": existing["host"],
                     "port": existing["port"],

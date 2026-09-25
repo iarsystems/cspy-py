@@ -14,8 +14,8 @@ from iar_cspy.context import context_ref
 # -- breakpoints --------------------------------------------------------------
 
 
-def test_breakpoint_add_validates_and_refreshes(fake):
-    client, rpc = fake
+def test_breakpoint_add_validates_and_refreshes(session):
+    client, rpc = session
     rpc.on("breakpoints", "setBreakpointOnUle", {"id": 11, "valid": True, "enabled": False})
     rpc.on("breakpoints", "getBreakpoint", lambda id: {"id": id, "valid": True, "enabled": True})
 
@@ -24,15 +24,15 @@ def test_breakpoint_add_validates_and_refreshes(fake):
     assert rpc.args("breakpoints", "setBreakpointOnUle") == [("main", int(AccessType.FETCH))]
 
 
-def test_breakpoint_add_rejects_an_invalid_result(fake):
-    client, rpc = fake
+def test_breakpoint_add_rejects_an_invalid_result(session):
+    client, rpc = session
     rpc.on("breakpoints", "setBreakpointOnUle", {"id": 0, "valid": False})
     with pytest.raises(CSpyError, match="invalid breakpoint"):
         client.breakpoints.add("no_such_symbol", AccessType.WRITE)
 
 
-def test_breakpoint_with_category_and_restore(fake):
-    client, rpc = fake
+def test_breakpoint_with_category_and_restore(session):
+    client, rpc = session
     rpc.on("breakpoints", "setBreakpointOnUleWithCategory", {"id": 12, "valid": True})
     rpc.on("breakpoints", "setBreakpointFromDescriptor", {"id": 0, "valid": False})
     rpc.on("breakpoints", "getBreakpoint", lambda id: {"id": id, "valid": True})
@@ -43,8 +43,8 @@ def test_breakpoint_with_category_and_restore(fake):
         client.breakpoints.restore('{"ule":"main"}')
 
 
-def test_breakpoint_listing_and_removal(fake):
-    client, rpc = fake
+def test_breakpoint_listing_and_removal(session):
+    client, rpc = session
     rpc.on("breakpoints", "getBreakpoints", [{"id": 1}, {"id": 2}])
     rpc.on("breakpoints", "enableBreakpoint", True).on("breakpoints", "removeBreakpoint", True)
     rpc.on("breakpoints", "getRecentlyHitBreakpoints", [{"id": 1}])
@@ -56,11 +56,39 @@ def test_breakpoint_listing_and_removal(fake):
     assert rpc.args("breakpoints", "removeBreakpoint") == [(1,), (2,)]
 
 
+def test_breakpoints_take_the_struct_or_its_id(session):
+    client, rpc = session
+    bp = rpc.struct("breakpoints", "getBreakpoint", id=7, ule="main", valid=True)
+    rpc.on("breakpoints", "setBreakpointOnUle", bp).on("breakpoints", "getBreakpoint", bp)
+    rpc.on("breakpoints", "enableBreakpoint", True).on("breakpoints", "removeBreakpoint", True)
+
+    client.breakpoints.disable(bp)
+    client.breakpoints.remove(7)
+    assert rpc.args("breakpoints", "enableBreakpoint") == [(7, False)]
+    with pytest.raises(CSpyError, match="breakpoint id or a Breakpoint"):
+        client.breakpoints.remove("main")
+
+    with client.breakpoints.temporary("main") as temp:
+        assert temp.id == 7
+    assert rpc.args("breakpoints", "removeBreakpoint") == [(7,), (7,)]
+
+
+def test_a_rejected_breakpoint_keeps_the_backend_error(session):
+    from iar_cspy import BackendError
+    from iar_cspy.testing import cspy_exception
+
+    client, rpc = session
+    rpc.on("breakpoints", "setBreakpointOnUle", cspy_exception(code=6, method="DkUle", message="bad ULE"))
+    with pytest.raises(BackendError, match="Setting a breakpoint on 'nope' failed") as exc:
+        client.breakpoints.add("nope")
+    assert client.classify_error(exc.value)["code"] == "CSPY_KDCERROR"
+
+
 # -- memory, disassembly, source ----------------------------------------------
 
 
-def test_memory_read_and_write(fake):
-    client, rpc = fake
+def test_memory_read_and_write(session):
+    client, rpc = session
     rpc.on("memory", "readMemory", b"\x01\x02\x03\x04").on("memory", "writeMemory")
 
     assert client.memory.read(0x100, 4) == b"\x01\x02\x03\x04"
@@ -73,8 +101,24 @@ def test_memory_read_and_write(fake):
     assert (loc.zone.id, loc.address, count, data) == (1, 0x200, 2, b"\xaa\xbb")
 
 
-def test_disassembly_and_source(fake):
-    client, rpc = fake
+def test_memory_takes_a_location_or_an_expression_value(session):
+    client, rpc = session
+    rpc.on("memory", "readMemory", b"\x00" * 4)
+    value = rpc.struct(
+        "debugger", "evalExpression", expression="g", hasLocation=True, location={"zone": {"id": 2}, "address": 0x40}
+    )
+    client.memory.read(value, 4)
+    client.memory.read(value.location, 4, zone=0)
+    locs = [args[0] for args in rpc.args("memory", "readMemory")]
+    assert [(loc.zone.id, loc.address) for loc in locs] == [(2, 0x40), (0, 0x40)]
+
+    register = rpc.struct("debugger", "evalExpression", expression="r0", hasLocation=False)
+    with pytest.raises(CSpyError, match="has no address"):
+        client.memory.read(register, 4)
+
+
+def test_disassembly_and_source(session):
+    client, rpc = session
     rpc.on("disassembly", "disassembleRange", [{"asm": "nop"}])
     rpc.on("sourcelookup", "getSourceRanges", [{"filename": "main.c"}])
 
@@ -101,8 +145,8 @@ def test_context_refs(fake):
         context_ref(client, [])  # type: ignore[arg-type]
 
 
-def test_stack_locals_and_symbol_lookup(fake):
-    client, rpc = fake
+def test_stack_locals_and_symbol_lookup(session):
+    client, rpc = session
     rpc.on("contextmanager", "getStack", [{"functionName": "main"}])
     rpc.on("contextmanager", "getStackDepth", 3)
     rpc.on("contextmanager", "getLocals", [{"name": "a"}, {"name": "x"}])
@@ -112,11 +156,11 @@ def test_stack_locals_and_symbol_lookup(fake):
     assert client.context.stack(0, 10)[0]["functionName"] == "main"
     assert rpc.args("contextmanager", "getStack")[0][1:] == (0, 10)
     assert client.context.depth() == 3
-    assert client.context.visible_symbols()["all"] == ["a", "x", "y"]
+    assert client.context.visible_symbols().all == ["a", "x", "y"]
 
     lookup = client.context.lookup("x")
-    assert lookup["matches"] == ["x"]
-    assert lookup["evaluations"] == [{"name": "x", "value": {"value": "42"}}]
+    assert lookup.matches == ["x"]
+    assert lookup.values == {"x": {"value": "42"}}
     with pytest.raises(CSpyError):
         client.context.lookup("  ")
 
@@ -183,9 +227,11 @@ def test_list_window_rows_navigate_a_sliding_window_first(fake, monkeypatch):
 
     monkeypatch.setattr(client.listwindows, "call", call)
     rows = client.listwindows.window("WIN_SLIDING_TRACE_WINDOW").rows(0, 10)
-    assert rows["returned"] == 2
-    assert rows["rows"][1]["row"]["cells"][0]["text"] == "row1"
+    assert (rows.row_count, len(rows.rows)) == (2, 2)
+    assert rows.rows[1]["row"]["cells"][0]["text"] == "row1"
     assert calls.index("navigateToFraction") < calls.index("setVisibleRows")
+    # Without a count, every row from first_row on.
+    assert [r["index"] for r in client.listwindows.window("W").rows(1).rows] == [1]
 
 
 def test_list_window_notifications(fake):

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from iar_cspy import Config, CoreState, CSpyError, SessionError, WaitTimeout
+from iar_cspy import BackendError, Config, CoreState, CSpyError, SessionError, StopResult, WaitTimeout
 from iar_cspy.testing import cspy_exception, fake_client
 
 
@@ -228,16 +228,16 @@ def test_session_context_manager_keeps_the_original_error(fake):
             raise ZeroDivisionError
 
 
-def test_wait_for_state(fake):
-    client, rpc = fake
+def test_wait_for_state(session):
+    client, rpc = session
     states = iter([1, 1, 0])
     rpc.on("debugger", "getCoreState", lambda core: next(states))
     result = client.debugger.wait_for_state(CoreState.STOPPED, timeout=1, poll_interval=0)
     assert (result.ok, result.attempts, result.state) == (True, 3, 0)
 
 
-def test_wait_for_state_timeout(fake):
-    client, rpc = fake
+def test_wait_for_state_timeout(session):
+    client, rpc = session
     rpc.on("debugger", "getCoreState", 1)
     with pytest.raises(WaitTimeout) as exc:
         client.debugger.wait_for_state(timeout=0, poll_interval=0)
@@ -246,63 +246,92 @@ def test_wait_for_state_timeout(fake):
     assert (result.ok, result.timed_out, result.state) == (False, True, 1)
 
 
-def test_go_and_wait(fake):
-    client, rpc = fake
+def test_go_and_wait(session):
+    client, rpc = session
     states = iter([1, 0])
     rpc.on("debugger", "go").on("debugger", "getCoreState", lambda core: next(states))
     assert client.debugger.go_and_wait(timeout=1, poll_interval=0).ok
     assert rpc.methods() == ["go", "getCoreState", "getCoreState"]
 
 
-def test_go_and_wait_waits_for_the_stop_event(fake):
-    # The core reads as stopped both before it starts and after it stops, so
-    # the target-stopped event is what tells the two apart.
-    client, rpc = fake
-    client.events.receiving = True
+STARTED, STOPPED = SimpleNamespace(note=1), SimpleNamespace(note=0)
+
+
+def post_later(client, delay, *events):
     handler = client.events.server.handler
-
-    def go():
-        threading.Timer(0.2, handler.postDebugEvent, [SimpleNamespace(note=0)]).start()
-
-    rpc.on("debugger", "go", go).on("debugger", "getCoreState", 0)
-    start = time.perf_counter()
-    result = client.debugger.go_and_wait(timeout=5, poll_interval=0)
-    assert result.ok
-    assert time.perf_counter() - start >= 0.2
+    threading.Timer(delay, lambda: [handler.postDebugEvent(e) for e in events]).start()
 
 
-def test_go_and_wait_ignores_events_from_before_the_go(fake):
-    client, rpc = fake
+def test_go_and_wait_waits_for_the_stop_event(session):
+    # The core reads as stopped both before it starts and after it stops, so
+    # the target-started/stopped events are what tell the two apart.
+    client, rpc = session
     client.events.receiving = True
-    client.events.server.handler.postDebugEvent(SimpleNamespace(note=0))
+    rpc.on("debugger", "go", lambda: post_later(client, 0.2, STARTED, STOPPED)).on("debugger", "getCoreState", 0)
+    result = client.debugger.go_and_wait(timeout=5, poll_interval=0)
+    assert (result.ok, result.state) == (True, CoreState.STOPPED)
+    # Counted from the go, not from the final poll.
+    assert result.elapsed_ms >= 200
+
+
+def test_go_and_wait_ignores_a_stop_before_the_target_started(session):
+    # A late stop event of an earlier halt, posted after the go but before
+    # the target has started running again, is not this run's stop.
+    client, rpc = session
+    client.events.receiving = True
+    rpc.on("debugger", "go", lambda: post_later(client, 0.0, STOPPED, STARTED)).on("debugger", "getCoreState", 0)
+    result = client.debugger.go_and_wait(timeout=0.3, poll_interval=0, check=False)
+    assert (result.ok, result.timed_out) == (False, True)
+
+
+def test_go_and_wait_without_a_stop_event_times_out(session):
+    client, rpc = session
+    client.events.receiving = True
+    client.events.server.handler.postDebugEvent(STARTED)
+    client.events.server.handler.postDebugEvent(STOPPED)  # from before the go
     rpc.on("debugger", "go").on("debugger", "getCoreState", 0)
     result = client.debugger.go_and_wait(timeout=0.2, poll_interval=0, check=False)
-    # No stop event after the go within the timeout: only one final state poll.
-    assert result.attempts == 1
+    # The core reads "stopped", but it was never seen to run and stop.
+    assert (result.ok, result.timed_out, result.attempts) == (False, True, 1)
+    assert result.elapsed_ms >= 200
+    with pytest.raises(WaitTimeout, match="no target-stopped event followed a target-started one"):
+        client.debugger.go_and_wait(timeout=0.05, poll_interval=0)
 
 
-def test_run_control_methods(fake):
-    client, rpc = fake
+def test_steps_wait_for_the_stop(session):
+    client, rpc = session
+    client.events.receiving = True
+    rpc.on("debugger", "stepOver", lambda: post_later(client, 0.05, STARTED, STOPPED))
+    rpc.on("debugger", "getCoreState", 0)
+    assert client.debugger.step_over(timeout=2).ok
+    assert client.debugger.step_over(wait=False) is None
+
+
+def test_run_control_methods(session):
+    client, rpc = session
     for method in ("go", "stop", "reset", "stepOver", "step", "stepOut", "loadModule"):
         rpc.on("debugger", method)
+    rpc.on("debugger", "getCoreState", 0)
     dbg = client.debugger
-    dbg.go(), dbg.halt(), dbg.reset(), dbg.step_over(), dbg.step_into(True), dbg.step_out()
+    dbg.go(), dbg.halt(), dbg.reset(), dbg.step_over(), dbg.step_into(True), dbg.step_out(wait=False)
     dbg.load_module("a.out")
-    assert rpc.methods() == ["go", "stop", "reset", "stepOver", "step", "stepOut", "loadModule"]
+    assert rpc.methods() == [
+        "go", "stop", "reset", "stepOver", "getCoreState", "step", "getCoreState", "stepOut", "loadModule"
+    ]
     # The step flag is only sent when given (see Debugger._step).
     assert rpc.args("debugger", "stepOver") == [()]
     assert rpc.args("debugger", "step") == [(True,)]
 
 
-def test_core_state_is_an_enum(fake):
-    client, rpc = fake
+def test_core_state_is_an_enum(session):
+    client, rpc = session
     rpc.on("debugger", "getCoreState", 1).on("debugger", "getNumberOfCores", 2)
     assert client.debugger.core_state() is CoreState.RUNNING
     assert client.debugger.core_states() == [CoreState.RUNNING, CoreState.RUNNING]
 
 
-def test_eval_builds_a_context_ref(fake):
-    client, rpc = fake
+def test_eval_builds_a_context_ref(session):
+    client, rpc = session
     rpc.on("debugger", "evalExpression", {"value": "7"})
     assert client.debugger.eval("x + 1") == {"value": "7"}
     ref, expr, sub, fmt, prefix = rpc.args("debugger", "evalExpression")[0]
@@ -344,8 +373,8 @@ class NamedLocation:
         self.location = f"LOC:{name}"
 
 
-def test_registers(fake, monkeypatch):
-    client, rpc = fake
+def test_registers(session, monkeypatch):
+    client, rpc = session
     rpc.on("debugger", "getRegisterGroups", ["CPU Registers (ABI)"])
     rpc.on("debugger", "getLocationNamesInGroup", ["r0", "r1", "r2"])
     rpc.on("debugger", "getNamedLocation", NamedLocation)
@@ -370,3 +399,103 @@ def test_registers(fake, monkeypatch):
     assert [r.name for r in snapshot.registers] == ["r0", "r1"]
     assert snapshot["R1"].value == 0x1234
     assert snapshot.registers[0].raw == b"\x34\x12\x00\x00"
+    # No limit: the whole group.
+    assert len(client.debugger.registers().registers) == 3
+
+
+# -- errors keep what callers branch on ------------------------------------------
+
+
+def test_lifecycle_failures_keep_the_backend_error(fake):
+    client, rpc = fake
+    license = cspy_exception(code=8, method="DkLoadModule", message="Failed")
+    rpc.on("debugger", "resolveLaunchConfiguration", {}).on("debugger", "configureSession", license)
+    with pytest.raises(BackendError) as exc:
+        client.debugger.configure(LAUNCH)
+    assert "Local lifecycle state was reset" in str(exc.value)
+    assert client.classify_error(exc.value)["code"] == "CSPY_KDCLICENSEVIOLATION"
+
+    rpc.on("debugger", "configureSession").on("debugger", "startSMPSession", license)
+    client.debugger.configure(LAUNCH)
+    with pytest.raises(BackendError, match="remains configured"):
+        client.debugger.start()
+
+
+# -- session guard ----------------------------------------------------------------
+
+
+def test_session_calls_need_a_session(fake):
+    client, rpc = fake
+    rpc.on("debugger", "go").on("breakpoints", "getBreakpoints", []).on("memory", "readMemory", b"")
+    for call in (client.debugger.go, client.breakpoints.all, lambda: client.memory.read(0, 4)):
+        with pytest.raises(SessionError, match=r"client\.\w+\.\w+\(\) requires an active debug session"):
+            call()
+    with pytest.raises(SessionError, match="attach"):
+        client.debugger.call("getCoreState", 0)
+    assert rpc.calls == []
+    # Pre-session methods and the diagnostic status do not need one.
+    rpc.on("debugger", "getVersionString", "9.5").on("debugger", "isOnline", False)
+    assert client.debugger.call("getVersionString") == "9.5"
+    assert client.debugger.status()["started"] is False
+
+
+def test_attach_adopts_a_running_session(fake):
+    client, rpc = fake
+    rpc.on("debugger", "isOnline", False)
+    with pytest.raises(SessionError, match="offline"):
+        client.debugger.attach()
+    rpc.on("debugger", "isOnline", True).on("debugger", "go")
+    client.debugger.attach()
+    client.debugger.go()
+    assert client.debugger.state == {"configured": True, "started": True}
+
+
+def test_a_replaced_backend_ends_the_session(session):
+    client, rpc = session
+    client.backend.debugger_generation += 1  # CSpyServer2 was restarted
+    with pytest.raises(SessionError, match="the debug session is gone"):
+        client.debugger.check_backend("getCoreState")
+    assert client.debugger.state == {"configured": False, "started": False}
+    client.debugger.check_backend("configureSession")  # starting over is fine
+
+
+def test_session_raises_when_stop_on_symbol_is_not_reached(fake, monkeypatch):
+    client, rpc = fake
+    for method in ("isOnline", "resolveLaunchConfiguration", "configureSession", "startSMPSession", "stopSession"):
+        rpc.on("debugger", method, False if method == "isOnline" else {})
+    rpc.on("debugger", "runToULE", cspy_exception(code=6, method="DkRunTo", message="no such symbol"))
+    with pytest.raises(SessionError, match="did not stop at stopOnSymbol 'main'"):
+        with client.debugger.session({**LAUNCH, "stopOnSymbol": "main"}):
+            pytest.fail("the body must not run")
+    assert rpc.methods()[-1] == "stopSession"
+    assert client.debugger.last_start.ran_to_symbol is False
+
+    # Opting out gives the session anyway.
+    with client.debugger.session({**LAUNCH, "stopOnSymbol": "main"}, require_stop_on_symbol=False) as dbg:
+        assert dbg.last_start.stop_on_symbol_error
+        assert dbg.client is client
+
+
+def test_call_stop_session_recovers_an_already_stopped_target(session):
+    client, rpc = session
+    rpc.on("debugger", "stopSession", cspy_exception())
+    rpc.on("debugger", "isOnline", True).on("debugger", "getNumberOfCores", 1).on("debugger", "getCoreState", 0)
+    result = client.debugger.call("stopSession")
+    assert isinstance(result, StopResult) and result.stop_idempotent_recovered
+    assert result.stop_idempotent_details["probe"]["already_stopped"] is True
+    assert client.debugger.state == {"configured": False, "started": False}
+
+
+def test_eval_int(session):
+    client, rpc = session
+    values = {"&g": "536'870'996", "c": "65", "n": "-5", "f": "1.5", "a": "<array>"}
+    rpc.on(
+        "debugger",
+        "evalExpression",
+        lambda ref, expr, sub, fmt, prefix: rpc.struct("debugger", "evalExpression", value=values[expr]),
+    )
+    assert [client.debugger.eval_int(e) for e in ("&g", "c", "n")] == [536870996, 65, -5]
+    assert rpc.args("debugger", "evalExpression")[0][3] == "Dec"
+    for expr in ("f", "a"):
+        with pytest.raises(CSpyError, match="did not evaluate to an integer"):
+            client.debugger.eval_int(expr)

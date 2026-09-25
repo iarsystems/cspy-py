@@ -6,7 +6,7 @@ IDE platform Thrift services that **`CSpyServer2` cannot host**. This
 document explains why, how to start them, and how to verify the result.
 
 - [Why CSpyServer2 is not enough](#why-cspyserver2-is-not-enough)
-- [Option A: let the bridge host them (managed mode)](#option-a-let-the-bridge-host-them-managed-mode)
+- [Option A: let iar-cspy host them (managed mode)](#option-a-let-iar-cspy-host-them-managed-mode)
 - [Option B: connect to a backend that already hosts them (standalone mode)](#option-b-connect-to-a-backend-that-already-hosts-them-standalone-mode)
 - [Verifying and troubleshooting](#verifying-and-troubleshooting)
 - [Reference: services, manifests, environment](#reference-services-manifests-environment)
@@ -44,10 +44,10 @@ are exactly that: implementations in dynamic libraries
 The key detail that makes this pleasant: a registry can be **shared**.
 `CSpyServer2 -sockets -registry <port>` joins an existing registry instead of
 starting its own. So one launcher-owned registry ends up holding the debugger
-services *and* the IDE services, and every tool in this bridge resolves through
+services *and* the IDE services, and every call resolves through
 that single registry with no per-service special casing.
 
-## Option A: let the bridge host them (managed mode)
+## Option A: let iar-cspy host them (managed mode)
 
 Managed mode - the default - makes `iar_cspy` own the whole backend:
 
@@ -121,7 +121,7 @@ Also available in serialized form in CSpyServer2-ServiceRegistry.txt
 [1003892] Entering main loop...
 ```
 
-Then point the bridge at that registry port, which selects standalone mode:
+Then connect to that registry port, which selects standalone mode:
 
 ```sh
 iar-cspy-mcp --registry-port 41821          # MCP server
@@ -133,7 +133,7 @@ is required because the Python Thrift runtime does not support named pipes.
 
 Any manifest not given on the command line is still loaded on demand through
 the service manager, so `-standalone -sockets` with no manifests at all is
-enough — the bridge will add what it needs.
+enough — `iar-cspy` adds what it needs.
 
 To attach a debugger to the *same* registry, start CSpyServer2 with
 `-sockets -registry <port>` rather than `-standalone`.
@@ -167,17 +167,17 @@ and which manifest would be used for each missing service:
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `... has no com.iar.thrift.service.manager service to start it with` | Only a bare `CSpyServer2` is running. Pass `--iar-path` so the bridge hosts the services, or point at a launcher/iaride registry. The error lists the services the registry *did* have. |
+| `... has no com.iar.thrift.service.manager service to start it with` | Only a bare `CSpyServer2` is running. Pass `--iar-path` so `iar-cspy` hosts the services, or point at a launcher/iaride registry. The error lists the services the registry *did* have. |
 | `Cannot reach IDE service ...: no service registry configured` | No registry at all: pass `--iar-path`, or set `THRIFT_REGISTRY_HOST`/`THRIFT_REGISTRY_PORT`. |
 | `Cannot host IDE services: no IarServiceLauncher path` | No `--iar-path`/`IAR_INSTALL_PATH`, or that installation does not ship the launcher. |
 | `neither the manifest ... nor the service library ... exists` | Wrong path. Check `--iar-path`/`IAR_INSTALL_PATH`. |
 | `CSpyServer2 was asked to join registry port N but reported port M` | CSpyServer2 did not attach to the launcher's registry; check its log path in the error. |
 | `Timed out waiting for the IarServiceLauncher registry port` | Raise `THRIFT_SERVICE_LAUNCHER_START_TIMEOUT_MS`; the error includes the launcher log path. |
 | `OptionsService CreateSession failed: Project not found: <path>` | The project is not loaded in the project manager. Call `project_load_workspace(<path>)` first. |
-| The host process dies on the first `options_*` call | OptionsService was started without ProjectManager in the same process. Let the bridge resolve the dependency (do not bypass it by loading only `OptionsService.json` by hand). |
+| The host process dies on the first `options_*` call | OptionsService was started without ProjectManager in the same process. Let `iar-cspy` resolve the dependency (do not bypass it by loading only `OptionsService.json` by hand). |
 
 `ide_services_ensure(force=true)` re-checks the registry after a backend
-restart, and `ide_services_stop_launcher()` tears down a launcher this bridge
+restart, and `ide_services_stop_launcher()` tears down a launcher the server
 started. Note that the launcher owns the registry, so stopping it also takes the
 managed CSpyServer2's registry away — expect to restart both.
 
@@ -195,32 +195,20 @@ ServiceManager-internal id:
 OptionsService reaches the project manager directly rather than over Thrift, so
 **ProjectManager must be hosted in the same process**. Starting `options` alone
 and then calling `CreateSession` takes the whole host process down rather than
-returning a failure. The bridge pulls the dependency in automatically, so
+returning a failure. `iar-cspy` pulls the dependency in automatically, so
 `THRIFT_IDE_SERVICES=options` and `ide_services_ensure("options")` both start
 ProjectManager first.
 
-Environment variables:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `IAR_INSTALL_PATH` | — | The IAR installation or build stage, i.e. the directory with `common/bin` under it. Normally the only path needed. |
-| `THRIFT_CSPYSERVER_MODE` | `managed` | `managed` (the bridge starts the backend) or `standalone` (connect to a running one). `external` and `launcher` are accepted as the names these used before. |
-| `THRIFT_HOST_IDE_SERVICES` | `1` | `0` runs the debugger alone, with no IarServiceLauncher. Same as `--no-ide-services`. |
-| `THRIFT_IDE_SERVICES` | both | Comma-separated subset: `projectmanager`, `options`. |
-| `THRIFT_AUTO_IDE_SERVICES` | `1` | Auto-start a missing service on the first `project_*`/`options_*` call. |
-| `THRIFT_SERVICE_LAUNCHER_EXE` | from `IAR_INSTALL_PATH` | Path to `IarServiceLauncher`, overriding `IAR_INSTALL_PATH`. |
-| `THRIFT_CSPYSERVER_EXE` | from `IAR_INSTALL_PATH` | Path to `CSpyServer2`, overriding `IAR_INSTALL_PATH`. |
-| `THRIFT_SERVICE_BIN_DIR` | `<IAR_INSTALL_PATH>/common/bin` | Where the service libraries and shipped manifests live. |
-| `THRIFT_SERVICE_LAUNCHER_START_TIMEOUT_MS` | `40000` | Wait for the launcher's registry banner. Higher than CSpyServer2's because the launcher loads the service libraries. |
-| `THRIFT_SERVICE_LAUNCHER_RESTART_ON_FAILURE` | `1` | Retry launcher startup once. |
-| `THRIFT_PROJECTMANAGER_SERVICE_NAME` | `com.iar.thrift.service.projectmanager` | Registry name override. |
-| `THRIFT_OPTIONSSERVICE_SERVICE_NAME` | `com.iar.optionsservice` | Registry name override. |
+The environment variables for all of this (`IAR_INSTALL_PATH`,
+`THRIFT_HOST_IDE_SERVICES`, `THRIFT_IDE_SERVICES`, `THRIFT_AUTO_IDE_SERVICES`,
+the program paths, timeouts and registry names) are described, with their
+defaults, in [`.env.example`](../.env.example).
 
 ## Known quirks
 
 **`OptionsService.json` may be missing from the installation.** The
 OptionsService library is installed but its service manifest is not always
-shipped alongside it. The bridge handles this by generating an equivalent
+shipped alongside it. `iar-cspy` handles this by generating an equivalent
 manifest in a temp directory; `ide_services_status()` shows the path under
 `loaded_manifests`. When the installation does ship the file, that one is used
 instead, so nothing needs changing if a later release adds it.
@@ -248,6 +236,6 @@ second debug session in one process failed with a connection error.
 
 **Transport is loopback TCP, and that is not configurable here.** The IDE
 platform picks named pipes by default on Windows and TCP sockets on Linux; the
-bridge passes `-sockets` so both end up on TCP, because the Python Thrift
+backend is started with `-sockets` so both end up on TCP, because the Python Thrift
 runtime cannot speak Windows named pipes. Those sockets bind to `127.0.0.1` on
 an ephemeral port, so the Thrift traffic never leaves the machine.

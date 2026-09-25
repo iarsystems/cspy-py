@@ -45,7 +45,7 @@ def main() -> int:
     failures = 0
 
     print(f"[repro] {loops} configure/start/stop cycles, {config.mode} backend")
-    with cspy.Client(config, owns_backend=True) as client:
+    with cspy.Client(config) as client:
         for i in range(1, loops + 1):
             try:
                 result = client.debugger.configure_and_start(LAUNCH)

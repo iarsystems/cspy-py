@@ -1,8 +1,8 @@
 # Debug Puzzle: Phantom Slot Shift
 
 Target program:
-- `tests/live_assets/main.c`
-- built output: `tests/live_assets/Debug/Exe/test.out`
+- `examples/firmware/main.c`
+- built output: `examples/firmware/Debug/Exe/test.out`
 
 ## Story
 A ring buffer write path is expected to store each iteration result at `iter & 15`.
@@ -19,7 +19,7 @@ Watch these globals while running:
 - `g_guard`: flips with a signature when mismatch is first detected
 
 ## Suggested MCP Walkthrough
-1. Configure/start session using `tests/live_assets/launch.json`.
+1. Configure/start session using `examples/firmware/launch.json`.
 2. Set code breakpoint on `main`.
 3. Set code breakpoint on source ULE around `commit_history` call site.
 4. Run and inspect:

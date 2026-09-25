@@ -29,3 +29,11 @@ def fake():
     client, rpc = fake_client()
     yield client, rpc
     client.close()
+
+
+@pytest.fixture()
+def session():
+    """(client, rpc) like ``fake``, with a started debug session."""
+    client, rpc = fake_client(started=True)
+    yield client, rpc
+    client.close()

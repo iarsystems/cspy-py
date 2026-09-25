@@ -20,6 +20,12 @@ classifiers = [
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
 
+# The fixtures load automatically wherever iar-cspy and pytest are installed.
+# The entry point name is the module name, so an explicit
+# "-p iar_cspy.pytest_plugin" is recognised as the same plugin.
+[project.entry-points.pytest11]
+"iar_cspy.pytest_plugin" = "iar_cspy.pytest_plugin"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

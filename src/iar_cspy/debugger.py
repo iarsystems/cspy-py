@@ -10,15 +10,16 @@ one.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
 
+from ._session import requires_session
 from ._thrift import to_plain
 from .context import ContextLike, context_ref
-from .errors import CSpyError, SessionError, WaitTimeout, cspy_exception_info, describe, error_entry
-from .events import TARGET_STOPPED
+from .errors import CSpyError, SessionError, WaitTimeout, cspy_exception_info, describe, error_entry, with_context
 from .launch import LaunchConfig
 from .types import CleanupResult, CoreState, Register, RegisterSnapshot, StartResult, StopResult, WaitResult
 
@@ -31,6 +32,11 @@ log = logging.getLogger(__name__)
 PRE_SESSION_METHODS = frozenset(
     {"getVersionString", "isOnline", "resolveLaunchConfiguration", "configureSession", "startSMPSession", "stopSession"}
 )
+
+#: Default timeout, in seconds, of the run-control waits.
+DEFAULT_TIMEOUT = 10.0
+
+_DECIMAL = re.compile(r"[-+]?\d+")
 
 
 def _core_state(value: Any) -> CoreState | int:
@@ -48,14 +54,28 @@ class Debugger:
         with client.debugger.session("launch.json") as dbg:
             client.breakpoints.add("main")
             dbg.go_and_wait(timeout=10)
-            print(dbg.eval("counter").value)
+            print(dbg.eval_int("counter"))
+
+    Methods that need a started session raise :class:`SessionError` without
+    one; :meth:`attach` adopts a session another frontend started.
     """
+
+    _api_name = "debugger"
 
     def __init__(self, client: Client) -> None:
         self._client = client
         self._lock = threading.Lock()
         self._configured = False
         self._started = False
+        #: ``Backend.debugger_generation`` the session runs in.
+        self._generation = 0
+        #: The :class:`StartResult` of the last :meth:`configure_and_start`.
+        self.last_start: StartResult | None = None
+
+    @property
+    def client(self) -> Client:
+        """The client this debugger belongs to (``cspy_session.client.memory``, ...)."""
+        return self._client
 
     def _call(self, method: str, *args: Any) -> Any:
         return self._client.call("debugger", method, *args)
@@ -65,11 +85,13 @@ class Debugger:
     @property
     def state(self) -> dict[str, bool]:
         """This client's view of the session: ``{"configured": ..., "started": ...}``."""
+        self._lost_session()
         with self._lock:
             return {"configured": self._configured, "started": self._started}
 
     @property
     def started(self) -> bool:
+        self._lost_session()
         with self._lock:
             return self._configured and self._started
 
@@ -80,13 +102,61 @@ class Debugger:
                 self._configured = bool(configured)
             if started is not None:
                 self._started = bool(started)
+            if configured or started:
+                self._generation = self._client.backend.debugger_generation
 
     def require_started(self, what: str) -> None:
-        """Raise SessionError unless this client configured and started a session."""
+        """Raise SessionError unless this client has a started session."""
         if not self.started:
             raise SessionError(
-                f"{what} requires an active debug session. Required order: configure(launch) -> start()."
+                f"{what} requires an active debug session. Start one with "
+                "client.debugger.session(launch) or configure_and_start(launch) (or configure() "
+                "then start()), or call client.debugger.attach() to use a session another "
+                "frontend, such as the IDE, started."
             )
+
+    def attach(self) -> None:
+        """Adopt a session that another frontend (e.g. a Thrift-enabled IDE) started.
+
+        For standalone mode: nothing is configured or started, this client
+        just stops refusing session calls. Raises SessionError when the
+        backend reports no target online.
+        """
+        if not self.is_online():
+            raise SessionError("attach() found no debug session: the backend reports the target offline.")
+        self.set_state(configured=True, started=True)
+
+    def _lost_session(self) -> bool:
+        """Whether the managed CSpyServer2 the session ran in has been replaced.
+
+        A managed CSpyServer2 that crashed or stopped responding is restarted
+        on the next call, and the new process has no session. Resets the
+        bookkeeping when that happened.
+        """
+        with self._lock:
+            active = self._configured or self._started
+            lost = active and self._generation != self._client.backend.debugger_generation
+        if lost:
+            log.warning("The managed CSpyServer2 was replaced; the debug session is gone.")
+            self._reset_state()
+        return lost
+
+    def check_backend(self, method: str | None = None) -> None:
+        """Raise SessionError if the session's CSpyServer2 was replaced under it.
+
+        :meth:`Client.call` runs this for every debug-session service call,
+        after the backend has been brought up. ``method`` is the RPC; the
+        :data:`PRE_SESSION_METHODS` are let through.
+        """
+        if not self._lost_session() or method in PRE_SESSION_METHODS:
+            return
+        diagnostics = self._client.backend.debugger_process.last_process_diagnostics
+        raise SessionError(
+            "The managed CSpyServer2 process exited or stopped responding and was replaced by a "
+            "fresh one, so the debug session is gone. Start a new session."
+            + (f"\n{diagnostics}" if diagnostics else ""),
+            diagnostics=diagnostics,
+        )
 
     def _reset_state(self) -> None:
         self.set_state(configured=False, started=False)
@@ -104,17 +174,24 @@ class Debugger:
         """RPC method names of the Debugger service."""
         return self._client.methods("debugger")
 
+    @requires_session
     def core_count(self) -> int:
         return int(self._call("getNumberOfCores"))
 
+    @requires_session
     def core_state(self, core: int = 0) -> CoreState | int:
         return _core_state(self._call("getCoreState", int(core)))
 
+    @requires_session
     def core_states(self) -> list[CoreState | int]:
         return [self.core_state(idx) for idx in range(max(0, self.core_count()))]
 
     def status(self) -> dict[str, Any]:
-        """Session flags, backend mode and process state, and core states if started."""
+        """A diagnostic snapshot: session flags, backend mode and processes, core states.
+
+        Never requires a session; the parts that could not be read have an
+        ``*_error`` entry instead.
+        """
         state = self.state
         backend = self._client.backend
         endpoint = backend.current_registry_endpoint()
@@ -128,11 +205,7 @@ class Debugger:
             "core_count": None,
             "core_states": None,
         }
-        processes = backend.status()
-        if "debugger" in processes:
-            status["managed_server"] = {"mode": "managed", **processes["debugger"]}
-        if "service_launcher" in processes:
-            status["service_launcher"] = processes["service_launcher"]
+        status.update(backend.process_status())
 
         try:
             status["backend_online"] = self.is_online()
@@ -141,7 +214,7 @@ class Debugger:
 
         if state["started"]:
             try:
-                count = self.core_count()
+                count = int(self._call("getNumberOfCores"))
                 status["core_count"] = count
                 status["core_states"] = [int(self._call("getCoreState", idx)) for idx in range(max(0, count))]
             except Exception as exc:  # noqa: BLE001
@@ -174,10 +247,10 @@ class Debugger:
             self._call("configureSession", resolve())
         except Exception as exc:  # noqa: BLE001
             self._reset_state()
-            raise CSpyError(
+            raise with_context(
+                exc,
                 "Configuring the debug session failed. Local lifecycle state was reset; retry "
                 f"configure -> start once the backend is healthy. Backend error: {exc}",
-                diagnostics=getattr(exc, "diagnostics", ""),
             ) from exc
         self._client.clear_session_caches()
         self.set_state(configured=True, started=False)
@@ -191,10 +264,10 @@ class Debugger:
             self._call("startSMPSession")
         except Exception as exc:  # noqa: BLE001
             self.set_state(started=False)
-            raise CSpyError(
+            raise with_context(
+                exc,
                 "Starting the debug session failed. The session remains configured but not "
                 f"started. Backend error: {exc}",
-                diagnostics=getattr(exc, "diagnostics", ""),
             ) from exc
         self.set_state(started=True)
 
@@ -207,7 +280,8 @@ class Debugger:
 
         CSpyServer2 never acts on ``stopOnSymbol`` itself: running there is the
         frontend's job (the IDE and the VS Code adapter do it), so it is done
-        here after start.
+        here after start. Not reaching it does not fail the start: check
+        ``result.ran_to_symbol`` (:meth:`session` does, and raises).
         """
         config = LaunchConfig.coerce(launch)
         handoff: dict[str, Any] = {
@@ -265,6 +339,7 @@ class Debugger:
                 result.ran_to_symbol = True
             except Exception as exc:  # noqa: BLE001
                 result.stop_on_symbol_error = str(exc)
+        self.last_start = result
         return result
 
     def stop_session(self) -> StopResult:
@@ -318,7 +393,8 @@ class Debugger:
                 parts.append(f"stopSession error: {describe(stop_error)}")
             if shutdown_error is not None:
                 parts.append(f"managed shutdown error: {shutdown_error}")
-            raise CSpyError(" ".join(parts)) from (shutdown_error or stop_error)
+            cause = stop_error if stop_error is not None else shutdown_error
+            raise with_context(cause, " ".join(parts)) from cause
         return result
 
     def cleanup(self, reset_target: bool = False) -> CleanupResult:
@@ -370,9 +446,27 @@ class Debugger:
         return CleanupResult(ok=not errors, errors=errors, before=before, after=self.state)
 
     @contextmanager
-    def session(self, launch: LaunchConfig | dict | str | Any) -> Iterator[Debugger]:
-        """``configure_and_start`` on entry, ``stop_session`` on exit."""
-        self.configure_and_start(launch)
+    def session(
+        self, launch: LaunchConfig | dict | str | Any, *, require_stop_on_symbol: bool = True
+    ) -> Iterator[Debugger]:
+        """``configure_and_start`` on entry, ``stop_session`` on exit.
+
+        When the launch configuration has a ``stopOnSymbol`` that was not
+        reached, the session is stopped again and SessionError raised, so the
+        body never runs from an unexpected place. Pass
+        ``require_stop_on_symbol=False`` to get the session anyway;
+        :attr:`last_start` then tells what happened.
+        """
+        result = self.configure_and_start(launch)
+        if require_stop_on_symbol and result.stop_on_symbol and not result.ran_to_symbol:
+            try:
+                self.stop_session()
+            except Exception:  # noqa: BLE001
+                log.warning("stop_session failed after not reaching stopOnSymbol", exc_info=True)
+            raise SessionError(
+                f"The session started, but did not stop at stopOnSymbol {result.stop_on_symbol!r}: "
+                f"{result.stop_on_symbol_error}. Pass require_stop_on_symbol=False to use it anyway."
+            )
         try:
             yield self
         except BaseException:
@@ -396,7 +490,7 @@ class Debugger:
             out["already_stopped"] = True
             return out
         try:
-            core_count = self.core_count()
+            core_count = int(self._call("getNumberOfCores"))
             out["core_count"] = core_count
         except Exception as exc:  # noqa: BLE001
             out["core_count_error"] = describe(exc)
@@ -429,40 +523,58 @@ class Debugger:
 
     # -- run control -----------------------------------------------------------
 
+    @requires_session
     def go(self) -> None:
         """Start execution; returns immediately (see :meth:`go_and_wait`)."""
         self._call("go")
 
+    @requires_session
     def halt(self) -> None:
         """Stop execution (``Debugger.stop``)."""
         self._call("stop")
 
+    @requires_session
     def reset(self) -> None:
         """Reset the target per the active reset style."""
         self._call("reset")
 
-    def step_over(self, enter_functions_without_source: bool | None = None) -> None:
-        """Step over one source statement."""
-        self._step("stepOver", enter_functions_without_source)
+    @requires_session
+    def step_over(
+        self, enter_functions_without_source: bool | None = None, *, wait: bool = True, timeout: float = DEFAULT_TIMEOUT
+    ) -> WaitResult | None:
+        """Step over one source statement; by default waits until it has stopped again."""
+        return self._step("stepOver", enter_functions_without_source, wait, timeout)
 
-    def step_into(self, enter_functions_without_source: bool | None = None) -> None:
-        """Step into one source statement."""
-        self._step("step", enter_functions_without_source)
+    @requires_session
+    def step_into(
+        self, enter_functions_without_source: bool | None = None, *, wait: bool = True, timeout: float = DEFAULT_TIMEOUT
+    ) -> WaitResult | None:
+        """Step into one source statement; by default waits until it has stopped again."""
+        return self._step("step", enter_functions_without_source, wait, timeout)
 
-    def _step(self, method: str, enter_functions_without_source: bool | None) -> None:
+    @requires_session
+    def step_out(self, *, wait: bool = True, timeout: float = DEFAULT_TIMEOUT) -> WaitResult | None:
+        """Run until the current function returns; by default waits until it has."""
+        return self._step("stepOut", None, wait, timeout)
+
+    def _step(
+        self, method: str, enter_functions_without_source: bool | None, wait: bool, timeout: float
+    ) -> WaitResult | None:
         # Sent only when given: CSpyServer2 behaves differently for an explicit
         # false than for the argument left out, and the latter is what works
         # without a frontend service.
         if enter_functions_without_source is None:
-            self._call(method)
+            action = lambda: self._call(method)  # noqa: E731
         else:
-            self._call(method, bool(enter_functions_without_source))
+            action = lambda: self._call(method, bool(enter_functions_without_source))  # noqa: E731
+        if not wait:
+            action()
+            return None
+        return self._run_and_wait(action, CoreState.STOPPED, core=0, timeout=timeout, poll_interval=0.05, check=True)
 
-    def step_out(self) -> None:
-        self._call("stepOut")
-
+    @requires_session
     def run_to(
-        self, ule: str, *, allow_single_step: bool = True, timeout: float = 10.0, wait: bool = True
+        self, ule: str, *, allow_single_step: bool = True, timeout: float = DEFAULT_TIMEOUT, wait: bool = True
     ) -> WaitResult | None:
         """Run until ``ule`` (e.g. ``"main"``) is reached.
 
@@ -476,12 +588,13 @@ class Debugger:
             return None
         return self._run_and_wait(action, CoreState.STOPPED, core=0, timeout=timeout, poll_interval=0.05, check=True)
 
+    @requires_session
     def wait_for_state(
         self,
         state: CoreState | int = CoreState.STOPPED,
         *,
         core: int = 0,
-        timeout: float = 5.0,
+        timeout: float = DEFAULT_TIMEOUT,
         poll_interval: float = 0.05,
         check: bool = True,
     ) -> WaitResult:
@@ -490,41 +603,19 @@ class Debugger:
         Raises :class:`WaitTimeout` on timeout, or with ``check=False``
         returns a result with ``timed_out=True``.
         """
-        target, core = int(state), int(core)
         start = time.perf_counter()
-        deadline = start + max(0.0, float(timeout))
-        attempts = 0
-        last: int | None = None
-        while True:
-            attempts += 1
-            last = int(self._call("getCoreState", core))
-            now = time.perf_counter()
-            if last == target or now >= deadline:
-                result = WaitResult(
-                    ok=last == target,
-                    timed_out=last != target,
-                    core=core,
-                    desired_state=target,
-                    state=last,
-                    attempts=attempts,
-                    elapsed_ms=int((now - start) * 1000.0),
-                )
-                if result.timed_out and check:
-                    raise WaitTimeout(
-                        f"Core {core} did not reach state {_core_state(target)!r} within {timeout}s "
-                        f"(last state {_core_state(last)!r})",
-                        result,
-                    )
-                return result
-            if poll_interval > 0:
-                time.sleep(poll_interval)
+        return self._poll_state(
+            state, core=core, start=start, deadline=start + max(0.0, float(timeout)), timeout=timeout,
+            poll_interval=poll_interval, check=check,
+        )
 
+    @requires_session
     def go_and_wait(
         self,
         state: CoreState | int = CoreState.STOPPED,
         *,
         core: int = 0,
-        timeout: float = 5.0,
+        timeout: float = DEFAULT_TIMEOUT,
         poll_interval: float = 0.05,
         check: bool = True,
     ) -> WaitResult:
@@ -532,8 +623,10 @@ class Debugger:
 
         Right after ``go`` the core can still read as stopped, before it has
         actually started. So when waiting for a stop and this client receives
-        the backend's debug events, it first waits for the target-stopped
-        event that follows the ``go``, then confirms the core state.
+        the backend's debug events, it first waits for the target-started and
+        then the target-stopped event that follow the ``go``, then confirms
+        the core state. Without those events within ``timeout`` the wait has
+        timed out, whatever the core state reads.
         """
         return self._run_and_wait(self.go, state, core=core, timeout=timeout, poll_interval=poll_interval, check=check)
 
@@ -543,29 +636,86 @@ class Debugger:
         events = self._client.events
         mark = events.mark()
         start = time.perf_counter()
+        deadline = start + max(0.0, float(timeout))
         action()
         if int(state) == CoreState.STOPPED and events.receiving:
-            events.wait_for(
-                lambda kind, event: kind == "debug" and getattr(event, "note", None) == TARGET_STOPPED,
-                after=mark,
-                timeout=timeout,
-            )
-        remaining = max(0.0, timeout - (time.perf_counter() - start))
-        return self.wait_for_state(state, core=core, timeout=remaining, poll_interval=poll_interval, check=check)
+            if events.wait_for_stop(after=mark, timeout=max(0.0, deadline - time.perf_counter())) is None:
+                return self._poll_state(
+                    state, core=core, start=start, deadline=start, timeout=timeout,
+                    poll_interval=0, check=check, stop_event_missing=True,
+                )
+        return self._poll_state(
+            state, core=core, start=start, deadline=deadline, timeout=timeout, poll_interval=poll_interval, check=check
+        )
+
+    def _poll_state(
+        self,
+        state: CoreState | int,
+        *,
+        core: int,
+        start: float,
+        deadline: float,
+        timeout: float,
+        poll_interval: float,
+        check: bool,
+        stop_event_missing: bool = False,
+    ) -> WaitResult:
+        """Poll the core state until ``state`` or ``deadline``; times are ``perf_counter`` values.
+
+        ``stop_event_missing``: no target-stopped event came, so reading
+        "stopped" does not count (the core may simply not have started).
+        """
+        target, core = int(state), int(core)
+        attempts = 0
+        while True:
+            attempts += 1
+            last = int(self._call("getCoreState", core))
+            now = time.perf_counter()
+            reached = last == target and not stop_event_missing
+            if reached or now >= deadline:
+                result = WaitResult(
+                    ok=reached,
+                    timed_out=not reached,
+                    core=core,
+                    desired_state=_core_state(target),
+                    state=_core_state(last),
+                    attempts=attempts,
+                    elapsed_ms=int((now - start) * 1000.0),
+                )
+                if result.timed_out and check:
+                    if stop_event_missing:
+                        message = (
+                            f"Core {core} was not seen to stop within {timeout}s: no target-stopped event "
+                            f"followed a target-started one (last state {result.state!r})"
+                        )
+                    else:
+                        message = (
+                            f"Core {core} did not reach state {result.desired_state!r} within {timeout}s "
+                            f"(last state {result.state!r})"
+                        )
+                    raise WaitTimeout(message, result)
+                return result
+            if poll_interval > 0:
+                time.sleep(poll_interval)
 
     # -- target data -----------------------------------------------------------
 
+    @requires_session
     def eval(
         self,
         expression: str,
-        context: ContextLike = None,
         *,
+        context: ContextLike = None,
         format: int | str = 0,
-        dereference: bool = False,
+        prefix: bool = False,
     ) -> Any:
-        """Evaluate a C expression; returns an ``ExprValue`` (``.value``, ``.type``, ...).
+        """Evaluate a C expression; returns an ``ExprValue`` struct.
 
-        ``format`` is an ``ExprFormat``: a number or a name such as ``"Hex"``.
+        ``.value`` is the value as text, ``.type`` the C type, and
+        ``.location`` where it lives (pass the ExprValue to
+        ``client.memory.read`` to read it). ``format`` is an ``ExprFormat``: a
+        number or a name such as ``"Hex"``; ``prefix`` adds the format's
+        prefix (``0x``) to the text. For a number use :meth:`eval_int`.
         """
         if not expression.strip():
             raise CSpyError("expression must be non-empty")
@@ -574,30 +724,46 @@ class Debugger:
         if expr_format in (0, "", None):
             expr_format = int(shared.ExprFormat.kDefault)
         return self._call(
-            "evalExpression", context_ref(self._client, context), expression, [], expr_format, bool(dereference)
+            "evalExpression", context_ref(self._client, context), expression, [], expr_format, bool(prefix)
         )
 
+    def eval_int(self, expression: str, *, context: ContextLike = None) -> int:
+        """Evaluate a C expression of integer, pointer, char or bool type to an ``int``."""
+        value = self.eval(expression, context=context, format="Dec")
+        # Decimal text, with ' as digit group separator: 536'870'996.
+        text = str(getattr(value, "value", "") or "").replace("'", "").strip()
+        if not _DECIMAL.fullmatch(text):
+            raise CSpyError(f"{expression!r} did not evaluate to an integer: {getattr(value, 'value', None)!r}")
+        return int(text, 10)
+
+    @requires_session
     def modules(self) -> list[Any]:
         """Loaded modules (``ModuleData`` structs)."""
         return self._call("getModules")
 
+    @requires_session
     def load_module(self, filename: str) -> None:
         self._call("loadModule", str(filename))
 
+    @requires_session
     def threads(self) -> list[Any]:
         return self._call("getThreadList")
 
+    @requires_session
     def cycle_counter(self, core: int = 0) -> int:
         return int(self._call("getCycleCounter", int(core)))
 
+    @requires_session
     def zones(self) -> list[Any]:
         """Memory zones (``ZoneInfo`` structs); zone ids are what memory calls take."""
         return self._call("getAllZones")
 
-    def registers(self, group: str = "CPU Registers (ABI)", limit: int = 64) -> RegisterSnapshot:
-        """Metadata and values of the registers in ``group``.
+    @requires_session
+    def registers(self, group: str = "CPU Registers (ABI)", limit: int | None = None) -> RegisterSnapshot:
+        """Metadata and values of the registers in ``group`` (the first ``limit``, if given).
 
-        Falls back to the first group when ``group`` does not exist. A
+        Falls back to the first group when ``group`` does not exist; on
+        targets without an ABI view that is usually ``"CPU Registers"``. A
         register whose value cannot be read has ``read_error`` set.
         """
         groups = list(self._call("getRegisterGroups") or [])
@@ -606,7 +772,8 @@ class Debugger:
 
         selected = group if group in groups else groups[0]
         names = list(self._call("getLocationNamesInGroup", selected) or [])
-        named_locations = [self._call("getNamedLocation", name) for name in names[: max(1, int(limit))]]
+        wanted = names if limit is None else names[: max(1, int(limit))]
+        named_locations = [self._call("getNamedLocation", name) for name in wanted]
 
         snapshot = RegisterSnapshot(
             group=selected, requested_group=group, available_groups=groups, total_in_group=len(names)
@@ -637,18 +804,30 @@ class Debugger:
     def call(self, method: str, *args: Any, **kwargs: Any) -> Any:
         """Call any Debugger RPC, keeping the session bookkeeping in sync.
 
-        ``configureSession``, ``startSMPSession`` and ``stopSession`` update
-        :attr:`state` as the dedicated methods would.
+        Methods other than :data:`PRE_SESSION_METHODS` need a started
+        session. ``configureSession``, ``startSMPSession`` and ``stopSession``
+        update :attr:`state` as the dedicated methods would. A ``stopSession``
+        failure that only means "already stopped" (see
+        :meth:`benign_stop_error`) is not raised: a :class:`StopResult`
+        saying so is returned instead.
         """
+        if method not in PRE_SESSION_METHODS:
+            self.require_started(f"client.debugger.call({method!r})")
         try:
             result = self._client.call("debugger", method, *args, **kwargs)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             if method == "configureSession":
                 self._reset_state()
             elif method == "startSMPSession":
                 self.set_state(started=False)
             elif method == "stopSession":
+                # Probe before the reset: the probe reads the core states.
+                benign, details = self.benign_stop_error(exc)
                 self._reset_state()
+                if benign:
+                    return StopResult(
+                        already_stopped=True, stop_idempotent_recovered=True, stop_idempotent_details=details
+                    )
             raise
 
         if method == "configureSession":

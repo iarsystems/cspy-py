@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from ._callbacks import CallbackServer
 from ._thrift import coerce_call_args, to_plain
 from .errors import CSpyError
+from .types import ListWindowChunk, ListWindowOverview, ListWindowRows, TraceStatus
 
 if TYPE_CHECKING:
     from .client import Client
@@ -140,7 +141,7 @@ class ListWindow:
             return int(to_plain(self.call("getChunkInfo")).get("numberOfRows", 0) or 0)
         return int(self.call("getNumberOfRows"))
 
-    def overview(self) -> dict[str, Any]:
+    def overview(self) -> ListWindowOverview:
         """Display name, columns, list spec and row count."""
         display_name = str(self.call("getDisplayName"))
         columns = to_plain(self.call("getColumnInfo"))
@@ -152,62 +153,52 @@ class ListWindow:
         else:
             chunk = None
             n_rows = int(self.call("getNumberOfRows"))
-        return {
-            "service_name": self.service_name,
-            "display_name": display_name,
-            "is_sliding": is_sliding,
-            "row_count": n_rows,
-            "chunk_info": chunk,
-            "columns": columns,
-            "list_spec": spec,
-        }
+        return ListWindowOverview(
+            display_name=display_name,
+            is_sliding=is_sliding,
+            row_count=n_rows,
+            chunk_info=chunk,
+            columns=columns,
+            list_spec=spec,
+        )
 
-    def rows(self, first_row: int = 0, max_rows: int = 50) -> dict[str, Any]:
-        """Read up to ``max_rows`` rows starting at ``first_row``.
+    def rows(self, first_row: int = 0, count: int | None = None) -> ListWindowRows:
+        """Read ``count`` rows (default: all the rest) starting at ``first_row``.
 
         A sliding window reporting no rows is navigated first, since it only
-        materializes rows for an explicitly requested chunk.
+        materializes rows for an explicitly requested chunk; for a sliding
+        window "all" means the rows of the current chunk.
         """
         start = max(0, int(first_row))
-        count = max(1, int(max_rows))
 
         is_sliding = self.is_sliding()
         if is_sliding:
             chunk_info = to_plain(self.call("getChunkInfo"))
             row_count = int(chunk_info.get("numberOfRows", 0) or 0)
             if row_count == 0:
-                self.call("navigateToFraction", 0.5, 0, int(max(100, count)))
+                self.call("navigateToFraction", 0.5, 0, int(max(100, count or 0)))
                 chunk_info = to_plain(self.call("getChunkInfo"))
                 row_count = int(chunk_info.get("numberOfRows", 0) or 0)
         else:
             chunk_info = None
             row_count = int(self.call("getNumberOfRows"))
 
-        end = min(row_count, start + count)
+        end = row_count if count is None else min(row_count, start + max(1, int(count)))
         if row_count > 0:
             self.call("setVisibleRows", int(start), int(max(start, end - 1)))
 
         rows = [{"index": idx, "row": to_plain(self.call("getRow", int(idx)))} for idx in range(start, end)]
-        return {
-            "service_name": self.service_name,
-            "is_sliding": is_sliding,
-            "chunk_info": chunk_info,
-            "row_count": row_count,
-            "first_row": start,
-            "returned": len(rows),
-            "rows": rows,
-        }
+        return ListWindowRows(
+            is_sliding=is_sliding, chunk_info=chunk_info, row_count=row_count, first_row=start, rows=rows
+        )
 
-    def navigate(self, fraction: float = 0.5, chunk_pos: int = 0, min_lines: int = 100) -> dict[str, Any]:
+    def navigate(self, fraction: float = 0.5, chunk_pos: int = 0, min_lines: int = 100) -> ListWindowChunk:
         """Move a sliding window's chunk to ``fraction`` (0..1) of the full list."""
         result = to_plain(self.call("navigateToFraction", float(fraction), int(chunk_pos), int(max(1, min_lines))))
         chunk = to_plain(self.call("getChunkInfo"))
-        return {
-            "service_name": self.service_name,
-            "navigate_result": result,
-            "chunk_info": chunk,
-            "row_count": int(chunk.get("numberOfRows", 0) or 0),
-        }
+        return ListWindowChunk(
+            navigate_result=result, chunk_info=chunk, row_count=int(chunk.get("numberOfRows", 0) or 0)
+        )
 
 
 class TraceWindow:
@@ -220,17 +211,16 @@ class TraceWindow:
     def call(self, method: str, *args: Any) -> Any:
         return self._windows.call(self.service_name, method, *args, trace=True)
 
-    def status(self) -> dict[str, Any]:
-        return {
-            "service_name": self.service_name,
-            "is_enabled": bool(self.call("isEnabled")),
-            "can_enable": bool(self.call("canEnable")),
-            "can_clear": bool(self.call("canClear")),
-            "can_browse": bool(self.call("canBrowse")),
-            "is_browsing": bool(self.call("isBrowsing")),
-            "supports_trace_settings": bool(self.call("supportsTraceSettings")),
-            "progress": to_plain(self.call("getProgress")),
-        }
+    def status(self) -> TraceStatus:
+        return TraceStatus(
+            is_enabled=bool(self.call("isEnabled")),
+            can_enable=bool(self.call("canEnable")),
+            can_clear=bool(self.call("canClear")),
+            can_browse=bool(self.call("canBrowse")),
+            is_browsing=bool(self.call("isBrowsing")),
+            supports_trace_settings=bool(self.call("supportsTraceSettings")),
+            progress=to_plain(self.call("getProgress")),
+        )
 
     def set_enabled(self, enabled: bool = True) -> bool:
         """Enable or disable tracing; returns the resulting state."""

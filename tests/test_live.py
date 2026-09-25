@@ -26,7 +26,7 @@ def test_session_breakpoints_and_expressions(cspy_client, cspy_session):
     assert any(b.id == bp.id for b in cspy_client.breakpoints.all())
 
     cspy_session.go_and_wait(timeout=10)
-    assert int(cspy_session.eval("g_phase").value, 0) >= 0
+    assert cspy_session.eval_int("g_phase") >= 0
 
     cspy_client.breakpoints.remove(bp.id)
     assert all(b.id != bp.id for b in cspy_client.breakpoints.all())
@@ -67,7 +67,7 @@ def project_copy(tmp_path, cspy_config):
 
 def test_project_build_debug_and_options(cspy_client, project_copy):
     status = cspy_client.project.load(str(project_copy))
-    assert status["current_project"]["filename"] == str(project_copy)
+    assert status.current_project["filename"] == str(project_copy)
 
     build = cspy_client.project.build()
     assert build.succeeded, "\n".join(build.tail(30))

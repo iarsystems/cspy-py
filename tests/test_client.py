@@ -102,3 +102,77 @@ def test_connection_failures_become_cspy_errors(client):
     assert "Could not connect" in str(exc.value)
     assert classify(exc.value)["code"] == "TRANSPORT_CONNECTION_REFUSED"
     assert exc.value.diagnostics == "backend diagnostics"
+
+
+# -- entry points -------------------------------------------------------------
+
+
+def test_launch_reads_the_environment(monkeypatch, tmp_path):
+    import iar_cspy
+
+    monkeypatch.setenv("IAR_INSTALL_PATH", str(tmp_path))
+    monkeypatch.setenv("THRIFT_TIMEOUT_MS", "1234")
+    client = iar_cspy.launch()
+    assert (client.config.mode, client.config.iar_path, client.config.timeout_ms) == ("managed", tmp_path, 1234)
+    assert client.owns_backend
+    other = tmp_path / "other"
+    assert iar_cspy.launch(other, timeout_ms=5).config.iar_path == other.resolve()
+
+
+def test_connect_reads_the_environment(monkeypatch):
+    import iar_cspy
+
+    monkeypatch.setenv("THRIFT_REGISTRY_PORT", "5000")
+    monkeypatch.setenv("THRIFT_REGISTRY_HOST", "10.0.0.5")
+    client = iar_cspy.connect()
+    assert (client.config.mode, client.config.registry_host, client.config.registry_port) == (
+        "standalone",
+        "10.0.0.5",
+        5000,
+    )
+    assert not client.owns_backend
+    assert iar_cspy.connect(6000).config.registry_port == 6000
+
+
+def test_a_client_owns_the_backend_it_created():
+    from iar_cspy import Backend
+
+    assert Client(Config()).owns_backend is True
+    assert Client().owns_backend is True
+    assert Client(Config(), owns_backend=False).owns_backend is False
+    shared = Backend(Config())
+    assert Client(shared).owns_backend is False
+    assert Client(shared, owns_backend=True).owns_backend is True
+
+
+def test_call_converts_errors_and_checks_the_session_backend(client, monkeypatch):
+    from iar_cspy import SessionError
+
+    monkeypatch.setattr(client, "endpoint", lambda service: ("127.0.0.1", 1))
+
+    def invoke_at(service_cls, host, port, label, method, *args, **kwargs):
+        return client.traced(label, method, lambda: (_ for _ in ()).throw(cspy_exception(code=8)))
+
+    monkeypatch.setattr(client, "invoke_at", invoke_at)
+    with pytest.raises(BackendError) as exc:
+        client.call("debugger", "go")
+    assert client.classify_error(exc.value)["code"] == "CSPY_KDCLICENSEVIOLATION"
+
+    client.debugger.set_state(configured=True, started=True)
+    client.backend.debugger_generation += 1
+    with pytest.raises(SessionError, match="the debug session is gone"):
+        client.call("memory", "readMemory", {"zone": {"id": 0}, "address": 0}, 1, 8, 4)
+    # Services outside the debug session are not affected.
+    client.debugger.set_state(configured=True, started=True)
+    client.backend.debugger_generation += 1
+    with pytest.raises(BackendError):
+        client.call("libsupport", "requestInput", 1)
+
+
+def test_capabilities_never_raise(fake):
+    client, rpc = fake
+    rpc.on("debugger", "isOnline", CSpyError("connection refused"))
+    caps = client.capabilities()
+    assert caps["backend_online"] is None and caps["debugger_methods"]
+    assert [e["message"] for e in caps["errors"]] == ["isOnline failed"]
+    assert caps["errors"][0]["details"]["code"] == "TRANSPORT_CONNECTION_REFUSED"

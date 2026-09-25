@@ -8,9 +8,9 @@
 set of recipes; the [README](../README.md) has the reference
 overview, and every class and method has a docstring (`help(client.debugger)`).
 
-If you are an AI agent with the [MCP server](https://github.com/iarsystems/cspy-mcp) available: use a script like the
-ones below when a task needs loops, conditions or many steps. The objects
-mirror the MCP tools (`debugger_go_and_wait_for_core_state` is
+If you are an AI agent with the [MCP server](https://github.com/iarsystems/cspy-mcp)
+available: use a script like the ones below when a task needs loops,
+conditions or many steps. The objects mirror the MCP tools (`debugger_go_and_wait_for_core_state` is
 `client.debugger.go_and_wait`, `breakpoints_set_on_ule` is
 `client.breakpoints.add`, and so on).
 
@@ -26,13 +26,15 @@ pip install "iar-cspy @ git+https://github.com/iarsystems/cspy-py"
   CSpyServer2 for debugging, IarServiceLauncher for projects and options. A
   managed backend (`iar_cspy.launch(iar_path)`) is started and restarted for
   you. A standalone one (`iar_cspy.connect(registry_port)`) is someone
-  else's.
+  else's. [Backend modes](../README.md#backend-modes) has the details.
 - A **client** is your connection to it. Everything hangs off the client, and
   closing it stops a managed backend.
 - A **session** is one debug session: configure (from a launch
   configuration), start, and finally stop. CSpyServer2 supports one session
   per process, so with a managed backend each session gets a fresh process.
-  That is why `client.debugger.session(...)` is a context manager.
+  That is why `client.debugger.session(...)` is a context manager. The
+  methods that talk to a session (run control, `eval`, registers,
+  breakpoints, memory, the stack) raise `SessionError` without one.
 - Calls return the backend's own data structures (thriftpy2 structs with
   attribute access). `iar_cspy.to_plain(x)` turns any of them into
   dicts/lists, handy for printing or JSON.
@@ -49,9 +51,17 @@ finally:
 ```
 
 `launch()` takes any `Config` field as a keyword, e.g.
-`cspy.launch("/opt/iar/ewarm", host_ide_services=False, timeout_ms=30000)`.
-`cspy.Client(cspy.Config.from_env())` uses the same environment variables as
-the MCP server.
+`cspy.launch("/opt/iar/ewarm", host_ide_services=False, timeout_ms=30000)`;
+the rest comes from the environment variables the MCP server uses (see
+[`.env.example`](../.env.example)), so `cspy.launch()` alone works with
+`IAR_INSTALL_PATH` set. `cspy.Client(cspy.Config.from_env())` also honours
+`THRIFT_CSPYSERVER_MODE`, and like `launch()` stops the processes it started
+when closed.
+
+`session()` runs to the launch configuration's `stopOnSymbol` and raises
+`SessionError` when the target does not get there, so the body never starts
+from an unexpected place; `session(launch, require_stop_on_symbol=False)`
+lets it through, and `dbg.last_start` tells what happened.
 
 ## Recipes
 
@@ -63,8 +73,9 @@ with client.debugger.session("launch.json") as dbg:
     dbg.go_and_wait(timeout=10)
 
     print("PC", hex(dbg.registers()["PC"].value))
-    for name in client.context.visible_symbols()["all"]:
-        print(name, "=", dbg.eval(name).value)
+    for name in client.context.visible_symbols().all:
+        print(name, "=", dbg.eval(name).value)       # the value as C-SPY shows it
+    print("len =", dbg.eval_int("len"))              # as a Python int
 
     info = client.context.info()              # needs an IDE frontend, see below
     for frame in client.context.stack(0, 10):
@@ -91,6 +102,18 @@ with client.debugger.session("launch.json") as dbg:
         print({r.name: hex(r.value) for r in regs.registers if r.value is not None})
         sp = regs["R13_main"].value
         print("stack:", client.memory.read(sp, 64).hex(" ", 4))
+```
+
+### Step through a function
+
+```python
+with client.debugger.session("launch.json") as dbg:
+    with client.breakpoints.temporary("parse_header"):   # removed after the block
+        dbg.go_and_wait(timeout=10)
+    for _ in range(5):
+        dbg.step_over()                                  # waits until it has stopped
+        print(hex(dbg.registers()["PC"].value), dbg.eval_int("offset"))
+    print(client.memory.read(dbg.eval("header"), 8).hex())   # a variable's memory
 ```
 
 ### Watch a variable
@@ -141,13 +164,14 @@ full IAR installation provides; see [ide-services.md](ide-services.md).
 
 ```python
 client = cspy.connect(51926)              # the port iaride reports for its service registry
+client.debugger.attach()                  # adopt the session the IDE started
 print(client.debugger.version(), client.debugger.core_state())
 print(client.breakpoints.all())           # the IDE's session: do not stop it from here
 ```
 
-The API does not require a session this client started. Only the MCP tools
-guard on that, and `client.debugger.set_state(configured=True, started=True)`
-tells them the session exists.
+`attach()` checks that the target is online and then lets session calls
+through without configuring or starting anything. Waits fall back to polling
+the core state, because the IDE receives the debug events.
 
 ### Anything not wrapped
 
@@ -175,14 +199,18 @@ except cspy.CSpyError as exc:
 ```
 
 `BackendError.info` holds the debugger's result code (`kDcError`,
-`kDcLicenseViolation`, ...). `exc.diagnostics` has the managed processes' last
+`kDcLicenseViolation`, ...), also for errors the API re-raised with more
+context, such as a failed configure or a rejected breakpoint location. `exc.diagnostics` has the managed processes' last
 output when the failure looks like a crash. Backend behavior worth knowing
 about is collected in [backend-notes.md](backend-notes.md).
 
 ## Tests
 
-With the pytest plugin, each test gets a started session on the target, and
-tests are skipped when no backend is configured:
+The pytest plugin comes with the package: pytest loads it wherever
+`iar-cspy` is installed (install `iar-cspy[test]` to get pytest along). Each
+test gets a started session stopped at `stopOnSymbol`, with the terminal
+output and event buffer cleared, and tests are skipped when no backend is
+configured:
 
 ```python
 # conftest.py
@@ -190,8 +218,6 @@ from pathlib import Path
 
 import pytest
 from iar_cspy import LaunchConfig
-
-pytest_plugins = ["iar_cspy.pytest_plugin"]
 
 
 @pytest.fixture
@@ -201,8 +227,12 @@ def cspy_launch():
 
 ```python
 # test_protocol.py
-def test_handshake(cspy_client, cspy_session):
-    cspy_client.breakpoints.add("on_handshake_done")
+import pytest
+
+
+@pytest.mark.live                      # registered by the plugin
+def test_handshake(cspy_session):
+    cspy_session.client.breakpoints.add("on_handshake_done")
     cspy_session.go_and_wait(timeout=5)
     assert cspy_session.eval("g_link_state").value == "LINK_UP"
 ```
@@ -212,11 +242,18 @@ pytest --cspy-iar-path=/opt/iar/ewarm             # or --cspy-registry=PORT for 
 ```
 
 For code that uses the API, `iar_cspy.testing.fake_client()` returns a client
-whose RPCs you script, and no backend is needed:
+whose RPCs you script, and no backend is needed. Scripted exceptions are
+converted as real ones are, `rpc.struct()` builds a method's return struct,
+and `rpc.sequence()` answers successive calls in turn:
 
 ```python
+from iar_cspy import BackendError
 from iar_cspy.testing import cspy_exception, fake_client
 
-client, rpc = fake_client()
-rpc.on("debugger", "stopSession", cspy_exception(code=6, method="DkStop"))
+client, rpc = fake_client(started=True)
+rpc.on("debugger", "go", cspy_exception(code=8, method="DkGo"))
+try:
+    client.debugger.go()
+except BackendError as exc:
+    assert client.classify_error(exc)["code"] == "CSPY_KDCLICENSEVIOLATION"
 ```

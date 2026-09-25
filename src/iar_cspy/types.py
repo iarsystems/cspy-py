@@ -79,15 +79,26 @@ class _Result:
 
 @dataclass
 class WaitResult(_Result):
-    """Outcome of waiting for a core to reach a state."""
+    """Outcome of waiting for a core to reach a state.
+
+    ``elapsed_ms`` counts from the start of the operation (for
+    ``go_and_wait``, from the ``go``).
+    """
 
     ok: bool
     timed_out: bool
     core: int
-    desired_state: int
-    state: int | None
+    desired_state: CoreState | int
+    state: CoreState | int | None
     attempts: int
     elapsed_ms: int
+
+    def to_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        for key in ("desired_state", "state"):
+            if out[key] is not None:
+                out[key] = int(out[key])
+        return out
 
 
 @dataclass
@@ -159,6 +170,91 @@ class RegisterSnapshot(_Result):
             if name in (reg.name, reg.alias):
                 return reg
         raise KeyError(name)
+
+
+@dataclass
+class VisibleSymbols(_Result):
+    """Names of the locals and parameters in scope; ``all`` merges both without duplicates."""
+
+    locals: list[str]
+    parameters: list[str]
+    all: list[str]
+
+
+@dataclass
+class SymbolLookup(_Result):
+    """Outcome of :meth:`ContextManager.lookup`."""
+
+    query: str
+    prefix: bool
+    matches: list[str] = field(default_factory=list)
+    #: Match name -> ``ExprValue``.
+    values: dict[str, Any] = field(default_factory=dict)
+    #: Match name -> why evaluating it failed.
+    errors: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class ListWindowOverview(_Result):
+    display_name: str
+    is_sliding: bool
+    row_count: int
+    #: For sliding windows: which chunk of the full list is materialized.
+    chunk_info: dict[str, Any] | None
+    columns: Any
+    list_spec: Any
+
+
+@dataclass
+class ListWindowRows(_Result):
+    """Rows read from a list window: ``rows`` holds ``{"index": n, "row": {...}}`` dicts."""
+
+    is_sliding: bool
+    chunk_info: dict[str, Any] | None
+    row_count: int
+    first_row: int
+    rows: list[dict[str, Any]]
+
+
+@dataclass
+class ListWindowChunk(_Result):
+    """Outcome of navigating a sliding list window."""
+
+    navigate_result: Any
+    chunk_info: dict[str, Any]
+    row_count: int
+
+
+@dataclass
+class TraceStatus(_Result):
+    is_enabled: bool
+    can_enable: bool
+    can_clear: bool
+    can_browse: bool
+    is_browsing: bool
+    supports_trace_settings: bool
+    progress: Any
+
+
+@dataclass
+class ProjectInfo(_Result):
+    """One loaded project; a part that could not be read is in ``errors`` instead."""
+
+    #: The ``ProjectContext`` (``{"filename": ...}``).
+    project: dict[str, Any]
+    configurations: list[dict[str, Any]] | None = None
+    current_configuration: dict[str, Any] | None = None
+    #: ``"configurations"`` / ``"current_configuration"`` -> error message.
+    errors: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class ProjectStatus(_Result):
+    """What the project manager has loaded (:meth:`Project.status`)."""
+
+    has_workspace: bool
+    current_project: dict[str, Any] | None
+    projects: list[ProjectInfo]
 
 
 @dataclass

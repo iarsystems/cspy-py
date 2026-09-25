@@ -31,8 +31,12 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 - `errors.py`: `CSpyError` hierarchy, the stable error codes, `classify()`.
 - `_thrift.py`: IDL loading, JSON-to-struct coercion, `to_plain`. The IDL is in `idl/`.
 - `testing.py`: `fake_client()` / `FakeRpc` test doubles (public, also used
-  by the MCP server's tests).
-- `pytest_plugin.py`: `cspy_client` / `cspy_session` fixtures, `--cspy-*` options.
+  by the MCP server's tests). Scripted exceptions go through the real error
+  conversion; `fake_client(started=True)` starts with a session.
+- `pytest_plugin.py`: `cspy_client` / `cspy_session` fixtures, `--cspy-*`
+  options, the `live` marker. Registered through a `pytest11` entry point, so
+  it loads wherever the package is installed (not through `pytest.ini`).
+- `_session.py`: `requires_session`, the API's session guard.
 
 Also: `examples/firmware/` is the simulator program + launch.json
 used by the live tests and demos. `docs/` holds the API guide, IDE services
@@ -63,9 +67,14 @@ Important behavior:
 - The registry endpoint is not the debugger endpoint itself.
 - The event handler and libsupport services are hosted by this process and
   registered on configure/start.
-- One session per CSpyServer2 process: managed mode restarts it on stop.
-- `go_and_wait`/`run_to` wait for the backend's target-stopped event.
-  `runToULE` returns early, and the core reads "stopped" before it starts.
+- One session per CSpyServer2 process: managed mode restarts it on stop. A
+  replaced CSpyServer2 (`Backend.debugger_generation`) ends the session:
+  `Client.call` raises `SessionError` for calls that needed it.
+- Session-dependent API methods raise `SessionError` without a started
+  session; `debugger.attach()` adopts one another frontend started.
+- `go_and_wait`/`run_to`/the steps wait for a target-started then a
+  target-stopped event after the action. `runToULE` returns early, and the
+  core reads "stopped" before it starts.
 
 ## Breakpoint API Guidance (Important)
 `client.breakpoints.add(ule, access)` is the primary way to create breakpoints
@@ -115,3 +124,9 @@ confuses pytest's rootdir detection.
   `iar_cspy.testing.fake_client()`, and a live test when it is about backend
   semantics.
 - Treat descriptor inputs as opaque round-trip values only.
+- When re-raising an error with more context, use `errors.with_context(exc,
+  message)` so the class (`BackendError`, ...) and the backend result code
+  survive for `except` clauses and `classify()`.
+- API results are dataclasses in `types.py`; the MCP server's tools shape them
+  into their JSON. Changing an API result can change the MCP output, which is
+  a public contract: check it in `../cspy-mcp` (its tests) as well.

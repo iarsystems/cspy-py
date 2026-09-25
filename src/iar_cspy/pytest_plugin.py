@@ -1,15 +1,17 @@
 """pytest fixtures for testing firmware against C-SPY (hardware or simulator).
 
-Enable it in your top-level ``conftest.py``::
+Installing iar-cspy registers the plugin with pytest, so the fixtures are
+available without further setup (``-p no:iar_cspy.pytest_plugin`` turns it
+off). Then::
 
-    pytest_plugins = ["iar_cspy.pytest_plugin"]
-
-or on the command line with ``-p iar_cspy.pytest_plugin``. Then::
-
-    def test_counter_increments(cspy_session, cspy_client):
-        cspy_client.breakpoints.add("tick")
+    def test_counter_increments(cspy_session):
+        cspy_session.client.breakpoints.add("tick")
         cspy_session.go_and_wait(timeout=5)
-        assert int(cspy_session.eval("counter").value) > 0
+        assert cspy_session.eval_int("counter") > 0
+
+and run ``pytest --cspy-iar-path=/opt/iar/ewarm --cspy-launch=launch.json``
+(use the ``--opt=value`` form for paths: pytest mistakes a separate path
+argument for a test path when it looks for the rootdir).
 
 Where the backend comes from, in order: the ``--cspy-*`` options below, then
 the environment variables the MCP server uses (``IAR_INSTALL_PATH``,
@@ -26,8 +28,12 @@ Fixtures:
     The :class:`~iar_cspy.LaunchConfig` from ``--cspy-launch``. Override this
     fixture to point at your own launch.json.
 ``cspy_session``
-    A started debug session for ``cspy_launch`` (a :class:`~iar_cspy.debugger.Debugger`),
-    stopped after the test. Every test gets a fresh session.
+    A started debug session for ``cspy_launch`` (a :class:`~iar_cspy.Debugger`;
+    ``cspy_session.client`` is the client), stopped at its ``stopOnSymbol``
+    and stopped after the test. Every test gets a fresh session, with the
+    terminal output and the debug event buffer cleared.
+
+The ``live`` marker is registered for tests that need a backend.
 """
 
 from __future__ import annotations
@@ -53,6 +59,10 @@ def pytest_addoption(parser: Any) -> None:
         help="Service registry of an already-running backend (standalone mode).",
     )
     group.addoption("--cspy-launch", default=None, help="launch.json for the cspy_session fixture.")
+
+
+def pytest_configure(config: Any) -> None:
+    config.addinivalue_line("markers", "live: requires a C-SPY backend (see the --cspy-* options)")
 
 
 def config_from_options(pytestconfig: Any) -> Config:
@@ -89,7 +99,7 @@ def cspy_config(pytestconfig: Any) -> Config:
 
 @pytest.fixture(scope="session")
 def cspy_client(cspy_config: Config) -> Iterator[Client]:
-    client = Client(cspy_config, owns_backend=cspy_config.mode == "managed")
+    client = Client(cspy_config)
     try:
         yield client
     finally:
@@ -106,5 +116,7 @@ def cspy_launch(pytestconfig: Any) -> LaunchConfig:
 
 @pytest.fixture
 def cspy_session(cspy_client: Client, cspy_launch: LaunchConfig) -> Iterator[Debugger]:
+    cspy_client.terminal.clear()
+    cspy_client.events.recent(clear=True)
     with cspy_client.debugger.session(cspy_launch) as debugger:
         yield debugger

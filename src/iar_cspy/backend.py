@@ -59,6 +59,9 @@ class Backend:
         self.loaded_manifests: dict[str, str] = {}
         #: Incremented whenever a new IarServiceLauncher process is started.
         self.launcher_generation = 0
+        #: Incremented whenever a new CSpyServer2 process is started: a debug
+        #: session does not survive into the next one.
+        self.debugger_generation = 0
         atexit.register(self.shutdown)
 
     @classmethod
@@ -149,7 +152,10 @@ class Backend:
                 )
             if join_port is not None and not self.debugger_process.healthy():
                 self._prune_stale_registrations(join_port)
+            before = self.debugger_process.process
             port = self.debugger_process.ensure(exe, self.cspy_args(join_port))
+            if self.debugger_process.process is not before:
+                self.debugger_generation += 1
             if join_port is not None and port != join_port:
                 self.debugger_process.shutdown()
                 raise RuntimeError(
@@ -228,6 +234,16 @@ class Backend:
             launcher = self.launcher_process.status()
             launcher["loaded_manifests"] = dict(self.loaded_manifests)
             out["service_launcher"] = launcher
+        return out
+
+    def process_status(self) -> dict[str, Any]:
+        """The ``managed_server`` / ``service_launcher`` entries of the status reports."""
+        processes = self.status()
+        out: dict[str, Any] = {}
+        if "debugger" in processes:
+            out["managed_server"] = {"mode": "managed", **processes["debugger"]}
+        if "service_launcher" in processes:
+            out["service_launcher"] = processes["service_launcher"]
         return out
 
     def diagnostics(self) -> dict[str, str]:

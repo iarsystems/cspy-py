@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from ._thrift import to_plain
 from .errors import CSpyError
-from .types import BuildResult, ProjectDebugResult
+from .types import BuildResult, ProjectDebugResult, ProjectInfo, ProjectStatus
 
 if TYPE_CHECKING:
     from .client import Client
@@ -48,7 +48,7 @@ class Project:
         """Any ProjectManager RPC, e.g. ``call("SaveEwpFile", {"filename": path})``."""
         return self._client.call("projectmanager", method, *args, **kwargs)
 
-    def load(self, path: str, fetch_dependency_data: bool = True) -> dict[str, Any]:
+    def load(self, path: str, fetch_dependency_data: bool = True) -> ProjectStatus:
         """Load a workspace (.eww, with its projects) or a single project (.ewp).
 
         Returns :meth:`status`.
@@ -58,7 +58,7 @@ class Project:
         self.call(method, path, bool(fetch_dependency_data))
         return self.status()
 
-    def status(self) -> dict[str, Any]:
+    def status(self) -> ProjectStatus:
         """Loaded projects with their configurations, and the current selection."""
         has_workspace = bool(self.call("HasWorkspace"))
         projects = to_plain(self.call("GetProjects")) or []
@@ -68,20 +68,20 @@ class Project:
         except Exception:  # noqa: BLE001 - no current project is a normal state
             current_project = None
 
-        out_projects: list[dict[str, Any]] = []
+        out_projects: list[ProjectInfo] = []
         for prj in projects:
-            entry: dict[str, Any] = {"project": prj}
+            entry = ProjectInfo(project=prj)
             try:
-                entry["configurations"] = to_plain(self.call("GetConfigurations", prj))
+                entry.configurations = to_plain(self.call("GetConfigurations", prj))
             except Exception as exc:  # noqa: BLE001
-                entry["configurations_error"] = str(exc)
+                entry.errors["configurations"] = str(exc)
             try:
-                entry["current_configuration"] = to_plain(self.call("GetCurrentConfiguration", prj))
+                entry.current_configuration = to_plain(self.call("GetCurrentConfiguration", prj))
             except Exception as exc:  # noqa: BLE001
-                entry["current_configuration_error"] = str(exc)
+                entry.errors["current_configuration"] = str(exc)
             out_projects.append(entry)
 
-        return {"has_workspace": has_workspace, "current_project": current_project, "projects": out_projects}
+        return ProjectStatus(has_workspace=has_workspace, current_project=current_project, projects=out_projects)
 
     def resolve(self, project: str | None = None, configuration: str | None = None) -> tuple[dict[str, Any], str]:
         """(ProjectContext dict, configuration name), defaulting to the current ones."""

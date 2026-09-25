@@ -21,12 +21,18 @@ also by the MCP server. The others are useful to know when a call fails.
 - **`stopOnSymbol` is a frontend contract.** CSpyServer2 never acts on it: the
   IDE and the VS Code adapter run to the symbol after start. *Handled:*
   `configure_and_start()` does it.
-- **`runToULE` returns before the target gets there**, and right after `go`
-  the core state can still read "stopped". *Handled:* `run_to()` and
-  `go_and_wait()` wait for the backend's target-stopped debug event (this
-  process hosts `debugger.eventhandler`), then confirm the core state. When
+- **`runToULE` and the steps return before the target gets there**, and
+  right after `go` the core state can still read "stopped". The backend posts
+  a target-started and then a target-stopped debug event for every run and
+  step. *Handled:* `run_to()`, `go_and_wait()` and the steps wait for that
+  pair (this process hosts `debugger.eventhandler`), then confirm the core
+  state; a stop event left over from an earlier halt does not count. When
   another frontend owns the event handler (e.g. attaching to an IDE), they fall
   back to polling.
+- **A crashed CSpyServer2 takes the session with it.** *Handled:* in managed
+  mode it is replaced on the next call, and calls that needed the old session
+  raise `SessionError` with its last output, rather than failing against a
+  process that has no session.
 - **Some backends require a registered `debugger.eventhandler`** before
   configure/start succeed. *Handled:* registered automatically.
 
@@ -57,11 +63,17 @@ also by the MCP server. The others are useful to know when a call fails.
 
 ## Values and formats
 
-- **Hex values are digit-grouped**: `eval("x", format="Hex").value` gives
-  `cafe'babe`. Strip the `'` before `int(..., 16)`.
+- **Values are text, digit-grouped, and formatted per type**:
+  `eval("x", format="Hex").value` gives `cafe'babe` (no `0x` unless
+  `prefix=True`), a pointer shows as `g_phase (2000'0054)` and a `char` as
+  `A`. *Handled:* `eval_int()` asks for decimal and parses that.
 - **Register group names differ per target.** `registers()` falls back to
   the first group when the requested one (default `CPU Registers (ABI)`) does
   not exist; `available_groups` lists them.
+- **Created breakpoints report `accessType` 0.** A code breakpoint set with
+  `AccessType.FETCH` (1) reads back as `accessType=0`, which is not a
+  `shared.AccessType` value. Pass 1-4 when creating; do not branch on the
+  value read back.
 - **Breakpoint categories are translated**, e.g. `STD_CODE` becomes
   `STD_CODE2`. Emulator drivers have been seen rejecting the default
   categories, which leaves breakpoints effectively simulator-only there.

@@ -11,7 +11,7 @@ Drive a debug session from a script or test::
         with client.debugger.session("launch.json") as dbg:   # runs to stopOnSymbol
             client.breakpoints.add("my_function")
             dbg.go_and_wait(timeout=10)                        # until it stops again
-            print(dbg.eval("counter").value)
+            print(dbg.eval_int("counter"))
             print(hex(dbg.registers()["PC"].value))
             print(client.memory.read(0x20000000, 16).hex())
 
@@ -25,23 +25,40 @@ reaches any RPC the typed layer does not wrap.
 
 from ._thrift import to_plain
 from .backend import Backend
+from .breakpoints import Breakpoints
 from .client import Client, connect, launch
 from .config import Config
-from .errors import BackendError, CSpyError, SessionError, WaitTimeout
+from .context import ContextManager
+from .debugger import Debugger
+from .errors import BackendError, CSpyError, CSpyExceptionInfo, SessionError, WaitTimeout, classify
+from .events import Events
 from .launch import LaunchConfig
-from .options import ProjectNotLoaded
+from .listwindow import ListWindow, ListWindows, TraceWindow
+from .memory import Memory
+from .options import Options, OptionsSession, ProjectNotLoaded
+from .project import Project
+from .source import Disassembly, SourceLookup
+from .terminal import Terminal
 from .types import (
     AccessType,
     BuildResult,
     CleanupResult,
     Context,
     CoreState,
+    ListWindowChunk,
+    ListWindowOverview,
+    ListWindowRows,
     ProjectDebugResult,
+    ProjectInfo,
+    ProjectStatus,
     Register,
     RegisterSnapshot,
     StartResult,
     StopResult,
+    SymbolLookup,
     TerminalOutput,
+    TraceStatus,
+    VisibleSymbols,
     WaitResult,
 )
 
@@ -51,24 +68,48 @@ __all__ = [
     "AccessType",
     "Backend",
     "BackendError",
+    "Breakpoints",
     "BuildResult",
     "CSpyError",
+    "CSpyExceptionInfo",
     "CleanupResult",
     "Client",
     "Config",
     "Context",
+    "ContextManager",
     "CoreState",
+    "Debugger",
+    "Disassembly",
+    "Events",
     "LaunchConfig",
+    "ListWindow",
+    "ListWindowChunk",
+    "ListWindowOverview",
+    "ListWindowRows",
+    "ListWindows",
+    "Memory",
+    "Options",
+    "OptionsSession",
+    "Project",
     "ProjectDebugResult",
+    "ProjectInfo",
     "ProjectNotLoaded",
+    "ProjectStatus",
     "Register",
     "RegisterSnapshot",
     "SessionError",
+    "SourceLookup",
     "StartResult",
     "StopResult",
+    "SymbolLookup",
+    "Terminal",
     "TerminalOutput",
+    "TraceStatus",
+    "TraceWindow",
+    "VisibleSymbols",
     "WaitResult",
     "WaitTimeout",
+    "classify",
     "connect",
     "launch",
     "to_plain",

@@ -27,14 +27,9 @@ def main() -> int:
     parser.add_argument("--cspyserver2", help="CSpyServer2 executable, instead of --iar-path")
     args = parser.parse_args()
 
-    overrides = {}
-    if args.iar_path:
-        overrides["iar_path"] = args.iar_path
-    if args.cspyserver2:
-        overrides["cspy_executable"] = args.cspyserver2
-    config = cspy.Config.from_env(mode="managed", **overrides)
+    overrides = {"cspy_executable": args.cspyserver2} if args.cspyserver2 else {}
 
-    with cspy.Client(config, owns_backend=True) as client:
+    with cspy.launch(args.iar_path, **overrides) as client:  # the rest from the environment
         print("C-SPY", client.debugger.version())
 
         with client.debugger.session(LAUNCH) as dbg:  # runs to stopOnSymbol ("main")
@@ -42,16 +37,15 @@ def main() -> int:
 
             bp = client.breakpoints.add("commit_history")
             dbg.go_and_wait(timeout=10)
-            print(f"hit breakpoint {bp.id} on {bp.ule}; g_phase = {dbg.eval('g_phase').value}")
+            print(f"hit breakpoint {bp.id} on {bp.ule}; g_phase = {dbg.eval_int('g_phase')}")
 
             regs = dbg.registers(limit=4)
             print("registers:", ", ".join(f"{r.name}=0x{r.value:08x}" for r in regs.registers))
 
-            guard = dbg.eval("g_guard")
-            raw = client.memory.read(guard.location.address, 4, zone=guard.location.zone.id)
+            raw = client.memory.read(dbg.eval("g_guard"), 4)  # the variable's own memory
             print("g_guard in memory:", raw[::-1].hex())
 
-            client.breakpoints.remove(bp.id)
+            client.breakpoints.remove(bp)
             dbg.go()
             client.terminal.wait_for_text("DBG_DONE", timeout=30)  # then it idles forever
             dbg.halt()

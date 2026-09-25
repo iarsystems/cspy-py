@@ -30,6 +30,7 @@ from .errors import (
     classify,
     cspy_exception_info,
     describe_cspy_exception,
+    error_entry,
     looks_like_backend_fault,
 )
 from .events import Events
@@ -61,6 +62,9 @@ SERVICES: dict[str, tuple[str | None, str]] = {
 #: Services hosted by IarServiceLauncher/iaride, started on demand.
 _IDE_SERVICE_KEYS = {"projectmanager", "options"}
 
+#: Services whose state lives in the debug session of one CSpyServer2 process.
+_SESSION_SERVICE_KEYS = {"debugger", "contextmanager", "breakpoints", "memory", "disassembly", "sourcelookup"}
+
 
 def _safe_repr(value: Any, max_len: int = 180) -> str:
     text = repr(value)
@@ -73,20 +77,24 @@ class Client:
     >>> with iar_cspy.launch(iar_path="/opt/iar/ewarm") as client:
     ...     client.debugger.version()
 
-    The client owns the backend (and stops it on :meth:`close`) when it was
-    created by :func:`iar_cspy.launch` or given ``owns_backend=True``.
+    ``Client(Config.from_env())`` is the same, configured by the environment
+    variables. A client owns the backend (and on :meth:`close` stops the
+    processes it started) when it created the backend itself, i.e. was given
+    a Config or nothing, unless ``owns_backend=False``. A :class:`Backend`
+    passed in stays running unless ``owns_backend=True``.
     """
 
     def __init__(
         self,
         backend: Backend | Config | None = None,
         *,
-        owns_backend: bool = False,
+        owns_backend: bool | None = None,
     ) -> None:
+        created = backend is None or isinstance(backend, Config)
         if backend is None or isinstance(backend, Config):
             backend = Backend(backend)
         self.backend = backend
-        self.owns_backend = owns_backend
+        self.owns_backend = created if owns_backend is None else bool(owns_backend)
         self.idl = _thrift.Idl(self.config.thrift_file, self.config.include_dirs)
 
         self.registry = ServiceRegistry(self)
@@ -179,6 +187,8 @@ class Client:
                 ) from exc
         else:
             host, port = self.endpoint(service)
+        if service in _SESSION_SERVICE_KEYS:
+            self.debugger.check_backend(method)
 
         return self.invoke_at(service_cls, host, port, service, method, *args, timeout_ms=timeout_ms, **kwargs)
 
@@ -262,6 +272,8 @@ class Client:
         if service in _IDE_SERVICE_KEYS:
             self.ide_services.auto_ensure(service)
         host, port = self.endpoint(service)
+        if service in _SESSION_SERVICE_KEYS:
+            self.debugger.check_backend()
         conn = self._connect(service_cls, host, port, service)
         try:
             yield Connection(self, service, service_cls, conn)
@@ -295,6 +307,47 @@ class Client:
         """Forget per-session state that goes stale across reconfigure/stop."""
         self.listwindows.forget_connections()
         self.terminal.forget_exit_code()
+
+    def capabilities(self) -> dict[str, Any]:
+        """What the backend offers right now; never raises.
+
+        Session state, processes, whether the target is online, the Debugger
+        methods and, with a started session, the core count and registered
+        services. A probe that failed is listed in ``errors`` instead.
+        """
+        state = self.debugger.state
+        out: dict[str, Any] = {
+            "backend_mode": self.backend.mode,
+            "session": state,
+            "backend_online": None,
+            "core_count": None,
+            "debugger_methods": [],
+            "services": [],
+            "errors": [],
+        }
+        out.update(self.backend.process_status())
+
+        def probe(message: str, fn: Any) -> Any:
+            try:
+                return fn()
+            except Exception as exc:  # noqa: BLE001
+                out["errors"].append(
+                    error_entry(
+                        code="CAPABILITY_CHECK_FAILED",
+                        category="discovery",
+                        message=message,
+                        retryable=True,
+                        details=self.classify_error(exc),
+                    )
+                )
+                return None
+
+        out["backend_online"] = probe("isOnline failed", self.debugger.is_online)
+        out["debugger_methods"] = probe("debugger_list_methods failed", self.debugger.methods) or []
+        if state["started"]:
+            out["core_count"] = probe("getNumberOfCores failed", self.debugger.core_count)
+            out["services"] = probe("list services failed", self.registry.services) or []
+        return out
 
     def info(self) -> dict[str, Any]:
         """Configuration plus backend process state (does not contact the backend)."""
@@ -344,16 +397,31 @@ class RawService:
         return self._client.methods(self._service)
 
 
-def connect(registry_port: int, registry_host: str = "127.0.0.1", **config: Any) -> Client:
-    """Connect to an already-running backend through its service registry."""
-    return Client(Backend.standalone(registry_port, registry_host, **config))
+def _given(**values: Any) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def connect(registry_port: int | None = None, registry_host: str | None = None, **config: Any) -> Client:
+    """Connect to an already-running backend through its service registry.
+
+    Arguments not given come from the environment (``THRIFT_REGISTRY_PORT``,
+    ``THRIFT_REGISTRY_HOST``, ...; see :meth:`Config.from_env`). Nothing is
+    started, and closing the client leaves the backend running.
+    """
+    cfg = Config.from_env(
+        mode="standalone", **_given(registry_port=registry_port, registry_host=registry_host), **config
+    )
+    return Client(Backend(cfg), owns_backend=False)
 
 
 def launch(iar_path: str | Path | None = None, **config: Any) -> Client:
     """Start a managed backend from an IAR installation; the client owns it.
 
-    ``iar_path`` is the directory with ``common/bin`` under it. The processes
-    start on first use (or call ``client.backend.start()``) and stop when the
-    client is closed.
+    ``iar_path`` is the directory with ``common/bin`` under it; without it,
+    ``IAR_INSTALL_PATH`` is used, and other settings not given also come from
+    the environment (see :meth:`Config.from_env`). The processes start on
+    first use (or call ``client.backend.start()``) and stop when the client is
+    closed.
     """
-    return Client(Backend.managed(iar_path, **config), owns_backend=True)
+    cfg = Config.from_env(mode="managed", **_given(iar_path=iar_path), **config)
+    return Client(Backend(cfg), owns_backend=True)

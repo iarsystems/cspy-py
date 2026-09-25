@@ -20,10 +20,14 @@ tracks the tool-surface items; the numbers are kept from there.
   "TRUE", "")`. Consider first-class `debugger_run_to_ule` and a macro-based
   breakpoint fallback tool.
 
-15. [ ] Clarify the access_type enum
+15. [~] Clarify the access_type enum
 - Docstring says 1 = execute/fetch, but created breakpoints report
-  `accessType: 0` and the sim accepts both 0 and 1. Verify against
-  shared.AccessType and make the docstring, argument, and result consistent.
+  `accessType: 0` and the sim accepts both 0 and 1.
+- Verified: `shared.AccessType` is 1-4 (1 = kDkFetchAccess), and a fetch
+  breakpoint on the Cortex-M3 simulator reads back `accessType=0`. The docs
+  now say to pass 1-4 and not to rely on the value read back
+  (docs/backend-notes.md). Open: whether 0 is a backend bug, and what emulator
+  drivers report.
 
 16. [ ] Fix cycle counter signedness
 - `debugger_get_cycle_counter` returned -821365371 on hardware (i32 truncation
