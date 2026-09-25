@@ -1,5 +1,9 @@
 # iar-cspy: Python API for IAR C-SPY
 
+> **Experimental.** The `iar_cspy` Python API is experimental. IAR makes no
+> guarantees about its stability: it may change incompatibly, or be removed,
+> in any release and without notice.
+
 A typed Python API for the IAR C-SPY debugger and the Embedded Workbench IDE
 services, over their Thrift interfaces. Use it to script debug sessions, write
 hardware-in-the-loop tests, or let an AI agent do multi-step debugging in one

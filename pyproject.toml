@@ -5,12 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "iar-cspy"
 version = "0.1.0"
-description = "Python API for the IAR C-SPY debugger and IDE services, over their Thrift interfaces"
+description = "Experimental Python API for the IAR C-SPY debugger and IDE services, over their Thrift interfaces"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = ["thriftpy2>=0.5.2"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
     "Topic :: Software Development :: Debuggers",
     "Topic :: Software Development :: Embedded Systems",

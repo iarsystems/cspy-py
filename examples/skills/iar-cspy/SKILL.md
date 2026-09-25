@@ -9,6 +9,10 @@ description: Debug or test embedded firmware with the IAR C-SPY debugger (simula
 run, and read registers, memory, variables and program output. Write a short
 script and run it, rather than issuing many single debugger commands.
 
+The API is experimental, and IAR makes no guarantees about its stability.
+Check the installed version's docstrings rather than relying on memory. When
+writing code the user means to keep, such as test suites, point this out.
+
 ## Find the documentation
 
 Read the documentation before writing code. Do not guess method names.

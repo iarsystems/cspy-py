@@ -1,5 +1,9 @@
 # Python API guide
 
+> **Experimental.** The `iar_cspy` Python API is experimental. IAR makes no
+> guarantees about its stability: it may change incompatibly, or be removed,
+> in any release and without notice.
+
 `iar_cspy` scripts the IAR C-SPY debugger. This guide shows the model and a
 set of recipes; the [README](../README.md) has the reference
 overview, and every class and method has a docstring (`help(client.debugger)`).
