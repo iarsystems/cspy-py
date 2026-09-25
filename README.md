@@ -131,6 +131,12 @@ assert client.debugger.core_state() == cspy.CoreState.STOPPED
 
 More in the [API guide](docs/python-api.md).
 
+## For coding agents
+
+[examples/skills/iar-cspy](examples/skills/iar-cspy) is an agent skill
+that points an agent at this documentation and sets a few ground rules. Copy
+it into a project's `.claude/skills/` directory.
+
 ## How it works
 
 ```
@@ -161,6 +167,7 @@ examples/
   firmware/          Cortex-M3 simulator program + launch.json used by demos and live tests
   scripts/           API scripts: live_demo.py, repro_session_cycles.py
   pytest/            firmware tests using the pytest plugin
+  skills/iar-cspy/   an agent skill for the API, to copy into your own projects
 docs/                API guide, IDE services, backend notes
 ```
 
