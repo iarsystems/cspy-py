@@ -1,0 +1,82 @@
+<?xml version="1.0"?>
+<settings>
+    <Exceptions>
+        <StopOnUncaught>_ 0</StopOnUncaught>
+        <StopOnThrow>_ 0</StopOnThrow>
+    </Exceptions>
+    <CallStack>
+        <ShowArgs>0</ShowArgs>
+    </CallStack>
+    <Stack>
+        <FillEnabled>0</FillEnabled>
+        <OverflowWarningsEnabled>0</OverflowWarningsEnabled>
+        <WarningThreshold>0</WarningThreshold>
+        <SpWarningsEnabled>0</SpWarningsEnabled>
+        <WarnLogOnly>0</WarnLogOnly>
+        <UseTrigger>0</UseTrigger>
+        <TriggerName />
+        <LimitSize>0</LimitSize>
+        <ByteLimit>0</ByteLimit>
+    </Stack>
+    <TerminalIO>
+        <InputSource>1</InputSource>
+        <InputMode2>10</InputMode2>
+        <Filename>$PROJ_DIR$/TermIOInput.txt</Filename>
+        <InputEcho>1</InputEcho>
+        <ShowReset>0</ShowReset>
+        <InputEncodingICU>0</InputEncodingICU>
+        <OutputEncodingICU>0</OutputEncodingICU>
+    </TerminalIO>
+    <Trace1>
+        <Enabled>0</Enabled>
+        <ShowSource>1</ShowSource>
+    </Trace1>
+    <TermIOLog>
+        <LoggingEnabled>_ 0</LoggingEnabled>
+        <LogFile>_ ""</LogFile>
+    </TermIOLog>
+    <Aliases>
+        <Count>0</Count>
+        <SuppressDialog>0</SuppressDialog>
+        <SuppressResolveSourcesForDebugTarget>1</SuppressResolveSourcesForDebugTarget>
+    </Aliases>
+    <DisassembleMode>
+        <mode>0</mode>
+    </DisassembleMode>
+    <Interrupts>
+        <Enabled>1</Enabled>
+    </Interrupts>
+    <MemConfig>
+        <Base>1</Base>
+        <Manual>0</Manual>
+        <Ddf>1</Ddf>
+        <TypeViol>0</TypeViol>
+        <Stop>1</Stop>
+    </MemConfig>
+    <DriverProfiling>
+        <Enabled>0</Enabled>
+        <Mode>1</Mode>
+        <Graph>0</Graph>
+        <Symbiont>0</Symbiont>
+    </DriverProfiling>
+    <Simulator>
+        <Freq>10000000</Freq>
+        <FreqHi>0</FreqHi>
+        <MultiCoreRunAll>1</MultiCoreRunAll>
+    </Simulator>
+    <InterruptLog>
+        <GraphEnabled>0</GraphEnabled>
+        <LogEnabled>0</LogEnabled>
+        <ShowTimeLog>1</ShowTimeLog>
+        <SumEnabled>0</SumEnabled>
+        <ShowTimeSum>1</ShowTimeSum>
+        <SumSortOrder>0</SumSortOrder>
+    </InterruptLog>
+    <DataLog>
+        <GraphEnabled>0</GraphEnabled>
+        <LogEnabled>0</LogEnabled>
+        <ShowTimeLog>1</ShowTimeLog>
+        <SumEnabled>0</SumEnabled>
+        <ShowTimeSum>1</ShowTimeSum>
+    </DataLog>
+</settings>

@@ -1,0 +1,3 @@
+# Editable install of the package plus the test tools.
+-e .[test]
+pytest-timeout>=2.3

@@ -1,0 +1,33 @@
+{
+   "configurations" : [
+      {
+         "args" : [],
+         "download" : {
+            "deviceMacros" : [],
+            "performMassErase" : false,
+            "suppressAllDownloads" : false,
+            "suppressProgramDownload" : false,
+            "verifyAllDownloads" : false
+         },
+         "driver" : "Simulator",
+         "driverOptions" : [
+            "--endian=little",
+            "--cpu=Cortex-M3",
+            "--fpu=None",
+            "--semihosting",
+            "--multicore_nr_of_cores=1"
+         ],
+         "handleCRunEvents" : false,
+         "leaveTargetRunning" : false,
+         "name" : "test - Debug",
+         "plugins" : [],
+         "program" : "Debug/Exe/test.out",
+         "projectPath" : "test.ewp",
+         "request" : "launch",
+         "setupMacros" : [],
+         "stopOnSymbol" : "main",
+         "target" : "arm",
+         "type" : "cspy"
+      }
+   ]
+}

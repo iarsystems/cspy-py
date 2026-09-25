@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Runtime/build artifacts from live backend testing
+CSpyServer2-ServiceRegistry.txt
+examples/firmware/Debug/Obj/
+# Left behind by the project manager when it opens a project
+*.dnx.lock

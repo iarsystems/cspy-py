@@ -1,0 +1,76 @@
+namespace cpp CSpy.Themes.Thrift
+namespace java com.iar.themes
+
+struct ColorSchema{
+    1: i32 R
+    2: i32 G
+    3: i32 B
+}
+
+
+// This is a copy of the elements in IfxDisplayElement.h
+enum ThriftDisplayElement{
+  kWindowBg,
+  kText,
+  kDistinctText,
+  kSelectedText,
+  kSelectedBackground,
+  kInactiveSelectionText,
+  kInactiveSelectionBackground,
+  kValueChangedText,
+  kDisabledText,
+  kCurrentPc,
+  kCurrentPcStatementOnly,
+  kAlternativePc,
+  kBreakpoint,
+  kSignalGreen,
+  kSignalYellow,
+  kSignalRed,
+  kSideMargin,
+  kHighlightedBackground,
+  kHighlightedText,
+  kBtnFace,
+  kBtnShadow,
+  k3DDkShadow,
+  kTabBg,
+  kBtnText,
+  kBtnHighlight,
+  kGrayText,
+  kCaptionText,
+  kActiveCaptionBackground,
+  kInactiveCaptionBackground,
+  kActiveCaptionBackgroundGradient,
+  kInactiveCaptionBackgroundGradient,
+  kInactiveCaptionText,
+  kHotLinkNormalText,
+  kBarFace,
+  kBarShadow,
+  kBarHighlight,
+  kToolbarGradientDark,
+  kToolbarGradientLight,
+  kHighlightGradientLight,
+  kHighlightGradientDark,
+  kPressedToolbarBtnBg,
+  kTooltipText,
+  kTooltipBg,
+  kScrollbarBg,
+  kScrollbarFg,
+  kScrollbarHighlight,
+  kScrollbarDrag,
+  kMdiClientBg,
+  kWatchFamilyBg,
+  kStackFamilyBg,
+  kDisasmFamilyBg,
+  kMemoryFamilyBg,
+  kBreakpointFamilyBg,
+  kTraceFamilyBg,
+  kProfilerFamilyBg,
+  kInterruptFamilyBg,
+  kStateFamilyBg,
+  kDataLogFamilyBg,
+  kPowerLogFamilyBg,
+  kEventLogFamilyBg,
+  kRegisterFamilyBg,
+  kGrid,
+  kNumDisplayElements
+}
