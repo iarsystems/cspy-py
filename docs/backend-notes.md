@@ -112,7 +112,11 @@ also by the MCP server. The others are useful to know when a call fails.
 - **Breakpoint categories are translated**, e.g. `STD_CODE` becomes
   `STD_CODE2`. Emulator drivers have been seen rejecting the default
   categories, which leaves breakpoints effectively simulator-only there.
-  `run_to(ule)` is an alternative for "stop at X".
+  Explicit category ids outside the backend's translation map are dropped,
+  so `setBreakpointOnUleWithCategory` cannot set `EMUL_CODE` either.
+  *Handled:* `add_source`/`add_code`/`add_data`/`add_log` set breakpoints
+  from a descriptor with the driver's category, as the VS Code extension
+  does. `run_to(ule)` is an alternative for "stop at X".
 - **The cycle counter** has been seen returning a negative, 32-bit truncated
   value on hardware.
 

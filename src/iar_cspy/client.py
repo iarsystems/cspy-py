@@ -307,6 +307,7 @@ class Client:
         """Forget per-session state that goes stale across reconfigure/stop."""
         self.listwindows.forget_connections()
         self.terminal.forget_exit_code()
+        self.breakpoints.forget_driver()
 
     def capabilities(self) -> dict[str, Any]:
         """What the backend offers right now; never raises.

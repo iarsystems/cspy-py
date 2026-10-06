@@ -82,15 +82,22 @@ Important behavior:
   `terminal.send()`, as at a console; ending the session releases them.
 
 ## Breakpoint API Guidance (Important)
-`client.breakpoints.add(ule, access)` is the primary way to create breakpoints
-and watchpoints.
+`add_source(file, line)`, `add_code(location, mode)`, `add_data(location,
+access)` and `add_log(location, message)` are the primary way to create
+breakpoints: they build the ULE and a descriptor with the category the
+session's driver uses (`_drivers.py`, ported from the VS Code extension's
+`src/dap/breakpoints`). The driver comes from the configured launch
+configuration, or `use_driver()` after `attach()`.
+`client.breakpoints.add(ule, access)` takes a ULE and leaves the category to
+the backend (simulator-safe, often rejected on emulators).
 - `access`: `1` execute/fetch (code), `2` read, `3` write, `4` read/write
   (`iar_cspy.AccessType`).
 - ULE forms: `main`, `func+4`, `0x100`, `{/abs/path/file.c}.123.1`
   (reliable source form), `<ule>@<size>`. `main()` and `file.c:123` are
   backend-dependent.
 - `breakpoints.restore()` only takes
-  descriptors returned by a listing. Descriptors are opaque, round-trip only.
+  descriptors returned by a listing. Descriptors are opaque, round-trip only,
+  for callers; only `_drivers.py` writes them.
 
 ## Known Backend Issues
 See `docs/backend-notes.md`. In short:

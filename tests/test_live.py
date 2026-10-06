@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from iar_cspy import CoreState, LaunchConfig
+from iar_cspy import AccessType, CoreState, LaunchConfig
 
 pytestmark = pytest.mark.live
 
@@ -30,6 +30,23 @@ def test_session_breakpoints_and_expressions(cspy_client, cspy_session):
 
     cspy_client.breakpoints.remove(bp.id)
     assert all(b.id != bp.id for b in cspy_client.breakpoints.all())
+
+
+def test_typed_breakpoints_pick_the_drivers_categories(cspy_client, cspy_session, cspy_launch):
+    if cspy_launch.get("driver") != "Simulator":
+        pytest.skip("The expected categories are the simulator's")
+    bps = cspy_client.breakpoints
+    assert bps.add_code("commit_history").category == "STD_CODE2"
+    assert bps.add_code("main", "trace_start").category == "STD_TRACE_START2"
+    watch = bps.add_data("g_state", AccessType.WRITE)
+    assert watch.category == "STD_DATA2" and watch.valid
+    bps.add_log("phase_step", "phase {g_phase}")
+    bps.remove(watch)
+
+    cspy_session.go_and_wait(timeout=10)
+    logged = [str(getattr(e, "text", "")) for kind, e in cspy_client.events.recent() if kind == "log"]
+    assert any("phase " in text for text in logged)
+    bps.clear()
 
 
 def test_memory_registers_and_terminal(cspy_client, cspy_session):

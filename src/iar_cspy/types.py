@@ -10,7 +10,7 @@ readable names, context references, and the results of multi-step operations.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Any
 
 
@@ -34,6 +34,24 @@ class AccessType(IntEnum):
     READ = 2
     WRITE = 3
     READ_WRITE = 4
+
+
+class CodeBreakpointMode(str, Enum):
+    """The kind of code breakpoint to set; each maps to a driver's breakpoint category.
+
+    ``AUTO`` leaves hardware or software to the driver. Which modes a driver
+    supports varies: see :meth:`Breakpoints.modes`.
+    """
+
+    AUTO = "auto"
+    SOFTWARE = "software"
+    HARDWARE = "hardware"
+    TRACE_START = "trace_start"
+    TRACE_STOP = "trace_stop"
+    TRACE_FILTER = "trace_filter"
+    FLASH = "flash"
+    TIMER_START = "timer_start"
+    TIMER_STOP = "timer_stop"
 
 
 @dataclass(frozen=True)

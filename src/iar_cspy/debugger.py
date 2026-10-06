@@ -86,6 +86,9 @@ class Debugger:
         self._generation = 0
         #: The :class:`StartResult` of the last :meth:`configure_and_start`.
         self.last_start: StartResult | None = None
+        #: The resolved ``shared.LaunchConfiguration`` of the configured
+        #: session (None when attached, or without a session).
+        self.launch_configuration: Any = None
         #: What ended the session, when the backend reported a fatal error.
         self._fatal_error: str | None = None
         client.events.subscribe(self._on_event)
@@ -216,6 +219,7 @@ class Debugger:
 
     def _reset_state(self) -> None:
         self.set_state(configured=False, started=False)
+        self.launch_configuration = None
         self._client.clear_session_caches()
         # A backend read of target stdin that is still waiting would block
         # the next session's kernel thread.
@@ -318,6 +322,7 @@ class Debugger:
             if self._client.backend.use_core_count(cores):
                 self._client.ensure_callbacks()  # a new process, maybe with a registry of its own
             self._call("configureSession", resolved)
+            self.launch_configuration = resolved
         except Exception as exc:  # noqa: BLE001
             self._reset_state()
             hint = ""

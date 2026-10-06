@@ -9,7 +9,10 @@ tracks the tool-surface items; the numbers are kept from there.
 - [~] In progress
 - [x] Done
 
-14. [ ] Breakpoint tools are effectively sim-only against emulator drivers
+14. [~] Breakpoint tools are effectively sim-only against emulator drivers
+- The API's `add_source`/`add_code`/`add_data`/`add_log` set breakpoints
+  from descriptors with the driver's category, as the VS Code extension
+  does. Open: verify on emulator drivers, and use them in the MCP tools.
 - Root cause is two known backend bugs in breakpoint category handling
   (default categories only cover STD_CODE*/STD_DATA*; explicit category ids
   outside the backend translation map are silently dropped, so even the

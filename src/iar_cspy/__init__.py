@@ -25,7 +25,7 @@ reaches any RPC the typed layer does not wrap.
 
 from ._thrift import to_plain
 from .backend import Backend
-from .breakpoints import Breakpoints
+from .breakpoints import Breakpoints, SourceLocation
 from .client import Client, connect, launch
 from .config import Config
 from .context import ContextManager
@@ -43,6 +43,7 @@ from .types import (
     AccessType,
     BuildResult,
     CleanupResult,
+    CodeBreakpointMode,
     Context,
     CoreState,
     ListWindowChunk,
@@ -74,6 +75,7 @@ __all__ = [
     "CSpyExceptionInfo",
     "CleanupResult",
     "Client",
+    "CodeBreakpointMode",
     "Config",
     "Context",
     "ContextManager",
@@ -98,6 +100,7 @@ __all__ = [
     "Register",
     "RegisterSnapshot",
     "SessionError",
+    "SourceLocation",
     "SourceLookup",
     "StartResult",
     "StopResult",

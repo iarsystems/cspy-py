@@ -122,12 +122,34 @@ with client.debugger.session("launch.json") as dbg:
 from iar_cspy import AccessType
 
 with client.debugger.session("launch.json") as dbg:
-    client.breakpoints.add("g_state", AccessType.WRITE)        # data watchpoint
+    client.breakpoints.add_data("g_state", AccessType.WRITE)   # data watchpoint
     for _ in range(5):
         dbg.go_and_wait(timeout=10)
         print("g_state =", dbg.eval("g_state", format="Hex").value,
               "at PC", hex(dbg.registers()["PC"].value))
 ```
+
+### Breakpoints of a given kind
+
+`add_source`, `add_code`, `add_data` and `add_log` build the location
+expression and pick the breakpoint category the session's driver uses
+(`STD_CODE2` on the simulator, `EMUL_CODE` on I-jet, J-Link, ST-LINK, ...),
+as the IDE does:
+
+```python
+from iar_cspy import AccessType, CodeBreakpointMode
+
+bps = client.breakpoints
+bps.add_source("/abs/path/main.c", 82)                     # a source line
+bps.add_code("parse_header", CodeBreakpointMode.HARDWARE)  # a function, or an address (int)
+bps.add_data("g_state", AccessType.WRITE)                  # default: READ_WRITE
+bps.add_log("phase_step", "phase = {g_phase}")             # logs, and goes on running
+print(bps.modes())                                         # the modes the driver supports
+```
+
+The source path must be the one in the debug information. After
+`debugger.attach()` the driver is unknown: name it with
+`bps.use_driver("I-jet")` for modes other than the default.
 
 ### Run until the program prints something
 
