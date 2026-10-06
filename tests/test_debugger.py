@@ -175,7 +175,7 @@ def test_configure_and_start_in_managed_mode_always_cleans_up(monkeypatch):
     client, rpc = fake_client(Config(mode="managed"))
     lifecycle_rpc(rpc)
     restarts = []
-    monkeypatch.setattr(client.backend, "restart_debugger", lambda: restarts.append(True))
+    monkeypatch.setattr(client.backend, "stop_debugger", lambda: restarts.append(True))
 
     result = client.debugger.configure_and_start(LAUNCH)
     assert result.handoff["managed_fresh_process"] is True
@@ -216,7 +216,7 @@ def test_stop_session_in_managed_mode_restarts_the_backend(monkeypatch):
     client, rpc = fake_client(Config(mode="managed"))
     rpc.on("debugger", "stopSession")
     restarts = []
-    monkeypatch.setattr(client.backend, "restart_debugger", lambda: restarts.append(True))
+    monkeypatch.setattr(client.backend, "stop_debugger", lambda: restarts.append(True))
     started(client)
     result = client.debugger.stop_session()
     assert (result.backend_restarted, result.already_stopped) == (True, False)
@@ -229,7 +229,7 @@ def test_stop_session_in_managed_mode_restarts_the_backend(monkeypatch):
 def test_cleanup_in_managed_mode_leaves_stopping_to_the_process_exit(monkeypatch):
     client, rpc = fake_client(Config(mode="managed"))
     restarts = []
-    monkeypatch.setattr(client.backend, "restart_debugger", lambda: restarts.append(True))
+    monkeypatch.setattr(client.backend, "stop_debugger", lambda: restarts.append(True))
     started(client)
     assert client.debugger.cleanup().ok is True
     assert restarts == [True] and rpc.calls == []
@@ -239,7 +239,7 @@ def test_cleanup_resets_everything_and_reports_failures(fake, monkeypatch):
     client, rpc = fake
     rpc.on("debugger", "reset", CSpyError("boom")).on("debugger", "stopSession", CSpyError("boom"))
     monkeypatch.setattr(
-        client.backend, "restart_debugger", lambda: (_ for _ in ()).throw(RuntimeError("shutdown failed"))
+        client.backend, "stop_debugger", lambda: (_ for _ in ()).throw(RuntimeError("shutdown failed"))
     )
     client.terminal.send("abc")
     started(client)
@@ -249,7 +249,7 @@ def test_cleanup_resets_everything_and_reports_failures(fake, monkeypatch):
     assert [e["message"] for e in result.errors] == [
         "reset failed",
         "stopSession failed",
-        "shutdown_managed_server failed",
+        "stop_debugger failed",
     ]
     assert result.before == {"configured": True, "started": True}
     assert result.after == {"configured": False, "started": False}

@@ -137,7 +137,7 @@ def test_cspyserver2_joins_the_launcher_registry(tmp_path, monkeypatch):
         assert (backend.launcher_generation, backend.debugger_generation) == (1, 1)
 
         # A replaced CSpyServer2 counts as a new generation; the launcher stays.
-        backend.restart_debugger()
+        backend.stop_debugger()
         backend.registry_endpoint()
         assert (backend.launcher_generation, backend.debugger_generation) == (1, 2)
     finally:

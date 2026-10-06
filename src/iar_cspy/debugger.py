@@ -438,7 +438,7 @@ class Debugger:
         if self._client.backend.mode == "managed":
             shutdown_error: Exception | None = None
             try:
-                self._client.backend.restart_debugger()
+                self._client.backend.stop_debugger()
             except Exception as exc:  # noqa: BLE001
                 shutdown_error = exc
             self._reset_state()
@@ -515,9 +515,9 @@ class Debugger:
         self._client.terminal.clear_input()
 
         try:
-            self._client.backend.restart_debugger()
+            self._client.backend.stop_debugger()
         except Exception as exc:  # noqa: BLE001
-            failed("shutdown_managed_server failed", exc)
+            failed("stop_debugger failed", exc)
 
         return CleanupResult(ok=not errors, errors=errors, before=before, after=self.state)
 

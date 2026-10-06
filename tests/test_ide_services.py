@@ -161,7 +161,7 @@ def test_standalone_backend_never_starts_processes():
     backend = Backend.standalone(51926)
     assert backend.registry_endpoint() == ("127.0.0.1", 51926)
     assert backend.status() == {"mode": "standalone"}
-    backend.restart_debugger()  # a no-op outside managed mode
+    backend.stop_debugger()  # a no-op outside managed mode
 
 
 def test_standalone_backend_without_registry_has_no_endpoint():

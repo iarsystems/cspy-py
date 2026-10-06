@@ -265,7 +265,7 @@ class Backend:
 
     # -- lifecycle -------------------------------------------------------------
 
-    def restart_debugger(self) -> None:
+    def stop_debugger(self) -> None:
         """Stop the managed CSpyServer2 so the next use starts a fresh one.
 
         CSpyServer2 supports a single start/stop session cycle per process, so
