@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, TextIO
 
 from ._callbacks import CallbackServer
 from ._process import is_reachable
@@ -30,6 +30,9 @@ FATAL_ERROR_NOTES = frozenset({FATAL_ERROR, SILENT_FATAL_ERROR})
 #: How long, in seconds, a stop waits for the backend to move its inspection
 #: context to the new location (see :meth:`Events.wait_for_stop`).
 STOP_SETTLE_TIMEOUT = 0.5
+
+#: ``DkLoggingCategoryConstant`` values, as prefixes for :meth:`Events.forward_log`.
+LOG_CATEGORY_PREFIXES = {0: "", 1: "", 2: "Warning: ", 3: "Error: ", 4: ""}
 
 Listener = Callable[[str, Any], None]
 
@@ -88,6 +91,24 @@ class Events:
                     self._listeners.remove(listener)
 
         return unsubscribe
+
+    def forward_log(self, stream: TextIO) -> Callable[[], None]:
+        """From now on, write the backend's log events (the IDE's Debug Log) to ``stream``.
+
+        ``stream`` is a text file such as ``sys.stdout``. Events already
+        received are not written. Warnings and errors get a
+        ``Warning:``/``Error:`` prefix. Returns a function that stops the
+        forwarding, as :meth:`subscribe` does.
+        """
+
+        def listener(kind: str, event: Any) -> None:
+            if kind != "log":
+                return
+            text = str(_field(event, "text") or "").rstrip("\n")
+            prefix = LOG_CATEGORY_PREFIXES.get(_field(event, "cat"), "")
+            print(f"{prefix}{text}", file=stream, flush=True)
+
+        return self.subscribe(listener)
 
     def recent(self, clear: bool = False) -> list[tuple[str, Any]]:
         """Buffered (kind, event) pairs, oldest first."""
@@ -206,6 +227,12 @@ class Events:
             self._client.registry.register(EVENTHANDLER_SERVICE, host, port)
             self.receiving = True
             return {"ok": True, "status": "registered", "host": host, "port": port}
+
+
+def _field(event: Any, name: str) -> Any:
+    if isinstance(event, dict):
+        return event.get(name)
+    return getattr(event, name, None)
 
 
 def _is_inspection_change(kind: str, event: Any) -> bool:

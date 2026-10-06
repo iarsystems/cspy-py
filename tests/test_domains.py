@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -318,6 +320,19 @@ def test_events_are_buffered_and_dispatched(fake):
     client.events.server.handler.postLogEvent({"text": "x"})
     assert seen == ["debug"]
     assert [kind for kind, _ in client.events.recent()] == ["debug", "log"]
+
+
+def test_forward_log_prints_log_events(fake):
+    client, _ = fake
+    out = io.StringIO()
+    unsubscribe = client.events.forward_log(out)
+    handler = client.events.server.handler
+    handler.postLogEvent(SimpleNamespace(cat=1, text="Loaded debugee\n", timestamp=0))
+    handler.postDebugEvent({"note": 1})
+    handler.postLogEvent(SimpleNamespace(cat=3, text="Flash failed", timestamp=0))
+    unsubscribe()
+    handler.postLogEvent(SimpleNamespace(cat=1, text="after", timestamp=0))
+    assert out.getvalue() == "Loaded debugee\nError: Flash failed\n"
 
 
 # -- project ------------------------------------------------------------------

@@ -34,9 +34,12 @@ Licensed under the [MIT License](LICENSE).
 ## Quick start
 
 ```python
+import sys
+
 import iar_cspy as cspy
 
 with cspy.launch("/opt/iar/ewarm") as client:              # managed backend from an installation
+    client.events.forward_log(sys.stdout)                  # print the debug log from now on
     with client.debugger.session("launch.json") as dbg:   # configure, start, run to stopOnSymbol
         bp = client.breakpoints.add("process_packet")
         dbg.go_and_wait(timeout=10)                        # run until it stops again
@@ -68,7 +71,7 @@ client = cspy.connect(51926)          # registry port; registry_host= for anothe
 | `client.memory` | `read`, `write`, `read_u32`, `write_u32`, at an address (with `zone=`), a `Location`, or the `ExprValue` of a variable. |
 | `client.disassembly`, `client.source` | `range(start, end)`; `ranges(address)`. |
 | `client.terminal` | The target's console via libsupport: `text`, `output()`, `send(input)`, `wait_for_input_request()`, `wait_for_text("READY")`, `wait_for_exit()`. |
-| `client.events` | Debug events from the backend: `recent()`, `subscribe(fn)`. |
+| `client.events` | Debug events from the backend: `recent()`, `subscribe(fn)`, `forward_log(stream)` (writes the debug log to `stream` from then on). |
 | `client.listwindows` | Trace and other list windows: `services()`, `window(name).rows()`, `trace(name).set_enabled()`. |
 | `client.project` | Embedded Workbench projects: `load`, `status`, `build`, `files`, `launch_configuration`, `start_debugging`. |
 | `client.options` | The options dialog model: `open(project, configuration)` returns a session with `category_tree`, `option_tree`, `update`, `commit`. |
