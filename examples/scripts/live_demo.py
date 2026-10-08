@@ -1,4 +1,4 @@
-"""End-to-end demo of the iar_cspy API on the bundled simulator firmware.
+"""End-to-end demo of the iar_cspy package on the bundled simulator firmware.
 
 Starts a managed backend, runs the program to main, sets a breakpoint, runs
 to it, inspects state, then runs the program to completion and prints what it

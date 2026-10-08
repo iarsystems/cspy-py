@@ -1,6 +1,6 @@
 """Exceptions and the stable error taxonomy.
 
-Every failure the API raises is a :class:`CSpyError`. When the backend itself
+Every failure the package raises is a :class:`CSpyError`. When the backend itself
 reported the failure (a ``shared.CSpyException``), the error is a
 :class:`BackendError` carrying the decoded debugger result code.
 
@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 
 class CSpyError(RuntimeError):
-    """Raised when the API cannot load IDL, reach a service, or complete an RPC.
+    """Raised when the package cannot load IDL, reach a service, or complete an RPC.
 
     ``diagnostics`` holds recent output of the managed backend processes when
     the failure looks like a backend fault (crash, reset, timeout), else ``""``.

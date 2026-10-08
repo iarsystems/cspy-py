@@ -1,6 +1,6 @@
-# Python API guide
+# Usage guide
 
-> **Experimental.** The `iar_cspy` Python API is experimental. IAR makes no
+> **Experimental.** The `iar_cspy` package is experimental. IAR makes no
 > guarantees about its stability: it may change incompatibly, or be removed,
 > in any release and without notice.
 
@@ -229,7 +229,7 @@ except cspy.CSpyError as exc:
 ```
 
 `BackendError.info` holds the debugger's result code (`kDcError`,
-`kDcLicenseViolation`, ...), also for errors the API re-raised with more
+`kDcLicenseViolation`, ...), also for errors the package re-raised with more
 context, such as a failed configure or a rejected breakpoint location. `exc.diagnostics` has the managed processes' last
 output when the failure looks like a crash. Backend behavior worth knowing
 about is collected in [backend-notes.md](backend-notes.md).
@@ -271,7 +271,7 @@ def test_handshake(cspy_session):
 pytest --cspy-iar-path=/opt/iar/ewarm             # or --cspy-registry=PORT for a running backend
 ```
 
-For code that uses the API, `iar_cspy.testing.fake_client()` returns a client
+For code that uses the package, `iar_cspy.testing.fake_client()` returns a client
 whose RPCs you script, and no backend is needed. Scripted exceptions are
 converted as real ones are, `rpc.struct()` builds a method's return struct,
 and `rpc.sequence()` answers successive calls in turn:

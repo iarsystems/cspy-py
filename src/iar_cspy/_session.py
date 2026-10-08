@@ -1,4 +1,4 @@
-"""The lifecycle guard shared by the API classes that need a debug session."""
+"""The lifecycle guard shared by the package classes that need a debug session."""
 
 from __future__ import annotations
 

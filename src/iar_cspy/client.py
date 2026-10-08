@@ -1,4 +1,4 @@
-"""The client: one connection to a backend, and the root of the API.
+"""The client: one connection to a backend, and the root of the package.
 
 Everything goes through :meth:`Client.call`, which resolves a service through
 the registry, coerces arguments to the IDL types, invokes the RPC, and turns

@@ -13,7 +13,7 @@ Useful for unit-testing code built on iar_cspy without an IAR installation::
     assert rpc.methods() == ["getVersionString", "evalExpression"]
 
 The fake replaces :meth:`Client.call`, the registry and the callback-service
-registration; the real IDL is still loaded, so structs built by the API
+registration; the real IDL is still loaded, so structs built by the package
 (context references, locations) are genuine. Scripted exceptions go through
 the client's real error conversion: a :func:`cspy_exception` surfaces as a
 :class:`~iar_cspy.BackendError`, as it would from a backend.

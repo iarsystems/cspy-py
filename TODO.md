@@ -1,6 +1,6 @@
 # Open items
 
-Items that concern the API or the backend behavior it wraps. They come from
+Items that concern the package or the backend behavior it wraps. They come from
 the roadmap of the MCP server (https://github.com/iarsystems/cspy-mcp), which
 tracks the tool-surface items; the numbers are kept from there.
 
@@ -10,7 +10,7 @@ tracks the tool-surface items; the numbers are kept from there.
 - [x] Done
 
 14. [~] Breakpoint tools are effectively sim-only against emulator drivers
-- The API's `add_source`/`add_code`/`add_data`/`add_log` set breakpoints
+- The package's `add_source`/`add_code`/`add_data`/`add_log` set breakpoints
   from descriptors with the driver's category, as the VS Code extension
   does. Open: verify on emulator drivers, and use them in the MCP tools.
 - Root cause is two known backend bugs in breakpoint category handling

@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Project Summary
-This repository is `iar-cspy` (import `iar_cspy`), a Python API that drives the
+This repository is `iar-cspy` (import `iar_cspy`), a Python utility package that drives the
 IAR C-SPY debugger (and the Embedded Workbench ProjectManager/OptionsService)
 over its Thrift services. It starts or connects to the backend and wraps the
 services in typed objects. It is used directly for scripts, pytest HIL tests,
@@ -9,7 +9,7 @@ and agent-written one-off scripts.
 
 The MCP server, `iar-cspy-mcp` (https://github.com/iarsystems/cspy-mcp,
 usually checked out next to this repository as `../cspy-mcp`), is a thin
-adapter over this API. The dependency goes one way only: `iar_cspy` must never
+adapter over this package. The dependency goes one way only: `iar_cspy` must never
 import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 
 ## Key Files
@@ -36,17 +36,17 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 - `pytest_plugin.py`: `cspy_client` / `cspy_session` fixtures, `--cspy-*`
   options, the `live` marker. Registered through a `pytest11` entry point, so
   it loads wherever the package is installed (not through `pytest.ini`).
-- `_session.py`: `requires_session`, the API's session guard.
+- `_session.py`: `requires_session`, the package's session guard.
 
 Also: `examples/firmware/` is the simulator program + launch.json
-used by the live tests and demos. `docs/` holds the API guide, IDE services
+used by the live tests and demos. `docs/` holds the usage guide, IDE services
 and backend notes.
 
 ## Dependency and Compatibility Notes
 - `thriftpy2` loads the bundled IDL at runtime; it is the only dependency.
-- The MCP server builds on the public API (and `iar_cspy.testing`). Its tool
+- The MCP server builds on the public interface (and `iar_cspy.testing`). Its tool
   names, arguments and result shapes are a public contract for AI callers, so
-  API changes that alter what it returns need a matching change there.
+  changes that alter what it returns need a matching change there.
 
 ## Environment Contract
 Everything has defaults; the IDL is bundled. The usual inputs:
@@ -56,7 +56,7 @@ Everything has defaults; the IDL is bundled. The usual inputs:
 See `.env.example` for the rest.
 
 ## Runtime Architecture
-1. An API call (from a script, a test, or an MCP tool) reaches `Client.call`.
+1. A call (from a script, a test, or an MCP tool) reaches `Client.call`.
 2. `Backend.registry_endpoint()` ensures the managed processes are up and returns the registry.
 3. The service is resolved through the registry, and the RPC is made on a
    fresh connection.
@@ -72,7 +72,7 @@ Important behavior:
   replaced CSpyServer2 (`Backend.debugger_generation`) ends the session:
   `Client.call` raises `SessionError` for calls that needed it, as it does
   after the backend posts `kDkFatalError`.
-- Session-dependent API methods raise `SessionError` without a started
+- Session-dependent methods raise `SessionError` without a started
   session; `debugger.attach()` adopts one another frontend started.
 - `go_and_wait`/`run_to`/the steps wait for a target-started then a
   target-stopped event after the action. `runToULE` returns early, and the
@@ -81,7 +81,7 @@ Important behavior:
 - Target stdin reads (libsupport `requestInputBinary`) wait for
   `terminal.send()`, as at a console; ending the session releases them.
 
-## Breakpoint API Guidance (Important)
+## Breakpoint Guidance (Important)
 `add_source(file, line)`, `add_code(location, mode)`, `add_data(location,
 access)` and `add_log(location, message)` are the primary way to create
 breakpoints: they build the ULE and a descriptor with the category the
@@ -109,7 +109,7 @@ See `docs/backend-notes.md`. In short:
 - Headless: `ContextManager.getStack`/`getContextInfo` fail with "No such
   service: frontend" (no IDE frontend).
 - Flash loading and license (`kDcLicenseViolation`) failures during start.
-Failures may be backend lifecycle failures rather than API misuse.
+Failures may be backend lifecycle failures rather than misuse.
 
 ## Useful Local Commands
 ```sh
@@ -125,7 +125,7 @@ Use the `--opt=value` form for the `--cspy-*` paths: a separate path argument
 confuses pytest's rootdir detection.
 
 ## Current Priority and Next Work
-- Keep the API's errors actionable, for scripts and for AI callers through
+- Keep the package's errors actionable, for scripts and for AI callers through
   the MCP server.
 - Behavior belongs in `iar_cspy`, so that scripts and the MCP tools behave
   the same.
@@ -142,6 +142,6 @@ confuses pytest's rootdir detection.
 - When re-raising an error with more context, use `errors.with_context(exc,
   message)` so the class (`BackendError`, ...) and the backend result code
   survive for `except` clauses and `classify()`.
-- API results are dataclasses in `types.py`; the MCP server's tools shape them
-  into their JSON. Changing an API result can change the MCP output, which is
+- Results are dataclasses in `types.py`; the MCP server's tools shape them
+  into their JSON. Changing a result can change the MCP output, which is
   a public contract: check it in `../cspy-mcp` (its tests) as well.

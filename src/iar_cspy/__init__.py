@@ -1,6 +1,6 @@
-"""Python API for the IAR C-SPY debugger and IDE services.
+"""Python utility package for the IAR C-SPY debugger and IDE services.
 
-Experimental: IAR makes no guarantees about the stability of this API. It may
+Experimental: IAR makes no guarantees about the stability of this package. It may
 change incompatibly, or be removed, in any release and without notice.
 
 Drive a debug session from a script or test::

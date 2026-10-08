@@ -1,4 +1,4 @@
-"""The API against a real backend (skipped without one; see the --cspy-* options).
+"""The package against a real backend (skipped without one; see the --cspy-* options).
 
 Runs the bundled Cortex-M3 simulator firmware by default.
 """

@@ -1,4 +1,4 @@
-"""Packaging invariants of the API distribution."""
+"""Packaging invariants of the distribution."""
 
 from __future__ import annotations
 

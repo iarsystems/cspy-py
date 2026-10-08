@@ -1,9 +1,9 @@
-"""Value types used across the API.
+"""Value types used across the package.
 
 Backend data (breakpoints, stack frames, modules, expression values, ...) is
 returned as the thriftpy2 struct objects the IDL defines, with attribute
 access (``bp.id``, ``frame.functionName``); :func:`iar_cspy.to_plain` turns any
-of them into plain dicts. The types here are the API's own: enums with
+of them into plain dicts. The types here are the package's own: enums with
 readable names, context references, and the results of multi-step operations.
 """
 

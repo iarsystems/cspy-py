@@ -125,7 +125,7 @@ Then connect to that registry port, which selects standalone mode:
 
 ```sh
 iar-cspy-mcp --registry-port 41821          # MCP server
-iar_cspy.connect(41821)                     # Python API
+iar_cspy.connect(41821)                     # Python
 ```
 
 `-standalone` is required for the launcher to host a registry, and `-sockets`

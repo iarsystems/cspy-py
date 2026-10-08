@@ -83,7 +83,7 @@ also by the MCP server. The others are useful to know when a call fails.
   argument fail with `ServiceException: No such service,
   serviceName=frontend`. That service (`frontend.thrift`) is the IDE's UI:
   message boxes and file dialogs. So this is a limitation of running
-  headless; against a Thrift-enabled `iaride` these calls work. The API
+  headless; against a Thrift-enabled `iaride` these calls work. The package
   leaves the step flag out unless you set it, which avoids the step failure.
   Hosting a headless `frontend` stand-in (as is done for the event handler)
   would likely unblock the rest, but it would have to answer the backend's

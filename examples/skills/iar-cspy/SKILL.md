@@ -1,15 +1,15 @@
 ---
 name: iar-cspy
-description: Debug or test embedded firmware with the IAR C-SPY debugger (simulator or hardware) by writing Python scripts against the iar_cspy API. Use when asked to run, step, break on, inspect (registers, memory, variables, program output) or test a program under C-SPY, or to build/debug an IAR Embedded Workbench project, especially for multi-step work where one script beats many tool calls.
+description: Debug or test embedded firmware with the IAR C-SPY debugger (simulator or hardware) by writing Python scripts against the iar_cspy package. Use when asked to run, step, break on, inspect (registers, memory, variables, program output) or test a program under C-SPY, or to build/debug an IAR Embedded Workbench project, especially for multi-step work where one script beats many tool calls.
 ---
 
-# Driving C-SPY with the iar_cspy Python API
+# Driving C-SPY with the iar_cspy Python package
 
 `iar_cspy` scripts the IAR C-SPY debugger: start a session, set breakpoints,
 run, and read registers, memory, variables and program output. Write a short
 script and run it, rather than issuing many single debugger commands.
 
-The API is experimental, and IAR makes no guarantees about its stability.
+The package is experimental, and IAR makes no guarantees about its stability.
 Check the installed version's docstrings rather than relying on memory. When
 writing code the user means to keep, such as test suites, point this out.
 
@@ -23,7 +23,7 @@ Read the documentation before writing code. Do not guess method names.
    `.memory`, `.terminal`, `.project`, ...) for details. The source is next to
    it: `python -c "import iar_cspy, os; print(os.path.dirname(iar_cspy.__file__))"`.
 2. **Guides** in the cspy-py repository (<https://github.com/iarsystems/cspy-py>):
-   - `docs/python-api.md`: the model and recipes. Start here.
+   - `docs/guide.md`: the model and recipes. Start here.
    - `README.md`: the objects at a glance, errors, testing.
    - `docs/backend-notes.md`: backend behavior. Read it when a call fails
      unexpectedly.

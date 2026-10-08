@@ -1,10 +1,10 @@
-# iar-cspy: Python API for IAR C-SPY
+# iar-cspy: Python utilities for IAR C-SPY
 
-> **Experimental.** The `iar_cspy` Python API is experimental. IAR makes no
+> **Experimental.** The `iar_cspy` package is experimental. IAR makes no
 > guarantees about its stability: it may change incompatibly, or be removed,
 > in any release and without notice.
 
-A typed Python API for the IAR C-SPY debugger and the Embedded Workbench IDE
+A typed Python utility package for the IAR C-SPY debugger and the Embedded Workbench IDE
 services, over their Thrift interfaces. Use it to script debug sessions, write
 hardware-in-the-loop tests, or let an AI agent do multi-step debugging in one
 script. It is also what the [MCP server](https://github.com/iarsystems/cspy-mcp)
@@ -81,7 +81,7 @@ client = cspy.connect(51926)          # registry port; registry_host= for anothe
 
 Backend data comes back as the IDL's thriftpy2 struct objects, with attribute
 access (`bp.id`, `frame.functionName`, `value.type`); `cspy.to_plain(x)`
-converts any of them to dicts and lists. The API's own types (`CoreState`,
+converts any of them to dicts and lists. The package's own types (`CoreState`,
 `AccessType`, `Context`, `WaitResult`, `RegisterSnapshot`, `BuildResult`,
 `ProjectStatus`, ...) are dataclasses in `iar_cspy.types`, all exported from
 `iar_cspy`; `.to_dict()` gives plain data.
@@ -97,7 +97,7 @@ launch.json is needed.
 
 Everything raises `CSpyError`. `BackendError` means the backend itself
 reported a failure (`.info` has the decoded debugger result code), also when
-the API adds context to the message. `SessionError` means the call needs a
+the package adds context to the message. `SessionError` means the call needs a
 debug session: the methods that talk to one (run control, `eval`, registers,
 breakpoints, memory, stack) raise it without one, and `session()` raises it
 when the target did not stop at `stopOnSymbol`. When another frontend owns the
@@ -110,7 +110,7 @@ output. `client.classify_error(exc)` maps any exception onto a stable code
 `wait_for_state`) raise `WaitTimeout`, or return a result with
 `timed_out=True` when given `check=False`.
 
-The backend has quirks, and the API absorbs the known ones. Details are in
+The backend has quirks, and the package absorbs the known ones. Details are in
 [docs/backend-notes.md](docs/backend-notes.md):
 
 - `configure_and_start` hands off cleanly from a previous session and gives
@@ -150,7 +150,7 @@ and events cleared) and `cspy_launch` (override it to hard-wire your
 launch.json). The plugin also registers the `live` marker. See
 [examples/pytest](examples/pytest).
 
-`iar_cspy.testing` has test doubles for code built on the API, so it can be
+`iar_cspy.testing` has test doubles for code built on the package, so it can be
 unit-tested without a backend:
 
 ```python
@@ -165,7 +165,7 @@ assert client.debugger.eval_int("counter") == 42
 
 Scripted exceptions go through the same error conversion as real ones, so a
 `cspy_exception(...)` arrives as a `BackendError`. More in the
-[API guide](docs/python-api.md).
+[guide](docs/guide.md).
 
 ## For coding agents
 
@@ -211,10 +211,10 @@ src/iar_cspy/        client, backend, debugger, breakpoints, ... ; idl/ holds th
 tests/               unit tests (fakes) and live tests (a backend)
 examples/
   firmware/          Cortex-M3 simulator program + launch.json used by demos and live tests
-  scripts/           API scripts: live_demo.py, repro_session_cycles.py
+  scripts/           scripts: live_demo.py, repro_session_cycles.py
   pytest/            firmware tests using the pytest plugin
-  skills/iar-cspy/   an agent skill for the API, to copy into your own projects
-docs/                API guide, IDE services, backend notes
+  skills/iar-cspy/   an agent skill for the package, to copy into your own projects
+docs/                guide, IDE services, backend notes
 ```
 
 ## Development
