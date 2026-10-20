@@ -21,7 +21,7 @@
          "leaveTargetRunning" : false,
          "name" : "test - Debug",
          "plugins" : [],
-         "program" : "Debug/Exe/test.out",
+         "program" : "${workspaceFolder}/examples/firmware/Debug/Exe/test.out",
          "projectPath" : "test.ewp",
          "request" : "launch",
          "setupMacros" : [],

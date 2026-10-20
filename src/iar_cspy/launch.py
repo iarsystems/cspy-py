@@ -67,9 +67,6 @@ class LaunchConfig(dict):
     @classmethod
     def from_file(cls, path: str | Path, name: str | None = None) -> LaunchConfig:
         """Read a launch.json, picking the configuration called ``name`` (default: first).
-
-        Relative ``program`` / ``projectPath`` values are resolved against the
-        file's directory, as the IDE does.
         """
         path = Path(path)
         try:
@@ -79,8 +76,11 @@ class LaunchConfig(dict):
         config = cls.from_obj(data, name)
         for key in _PATH_FIELDS:
             value = config.get(key)
-            if value and not Path(value).is_absolute():
-                config[key] = str((path.parent / value).resolve())
+            if value:
+                value = value.replace("${workspaceFolder}", str(Path.cwd()))
+                if not Path(value).is_absolute():
+                    value = str(Path(value).absolute())
+                config[key] = value
         return config
 
     @classmethod

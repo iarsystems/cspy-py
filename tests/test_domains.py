@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import io
 import json
 import threading
@@ -453,13 +455,15 @@ def test_options_failures_are_raised(fake):
 
 def test_launch_config_from_file_resolves_paths(tmp_path):
     (tmp_path / "launch.json").write_text(
-        json.dumps({"configurations": [{"name": "a", "program": "Debug/a.out"}, {"name": "b", "program": "/abs/b.out"}]})
+        json.dumps({"configurations": [{"name": "a", "program": "Debug/a.out"}, {"name": "b", "program": "/abs/b.out"}, {"name": "c", "program": "${workspaceFolder}/Release/c.out"}]})
     )
     first = LaunchConfig.from_file(tmp_path / "launch.json")
-    assert first["program"] == str(tmp_path / "Debug" / "a.out")
+    cwd = Path(os.getcwd())
+    assert first["program"] == str(cwd / "Debug" / "a.out")
     assert LaunchConfig.from_file(tmp_path / "launch.json", name="b")["program"] == "/abs/b.out"
+    assert LaunchConfig.from_file(tmp_path / "launch.json", name="c")["program"] == str(cwd / "Release" / "c.out")
     with pytest.raises(CSpyError, match="No launch configuration named"):
-        LaunchConfig.from_file(tmp_path / "launch.json", name="c")
+        LaunchConfig.from_file(tmp_path / "launch.json", name="d")
     assert LaunchConfig.coerce(str(tmp_path / "launch.json")) == first
 
 
