@@ -7,6 +7,7 @@ use, a frontend must ``connect`` to it, handing over the location of a
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections import deque
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,8 @@ from .types import ListWindowChunk, ListWindowOverview, ListWindowRows, TraceSta
 
 if TYPE_CHECKING:
     from .client import Client
+
+log = logging.getLogger(__name__)
 
 
 class _ListWindowFrontendHandler:
@@ -76,6 +79,23 @@ class ListWindows:
     def is_connected(self, service_name: str) -> bool:
         with self._lock:
             return service_name in self._connected
+
+    def connect(self, service_name: str) -> bool:
+        """Connect to a list window, as an IDE does when it opens one; whether it is now connected.
+
+        Does nothing if the window is not registered (it does not wait for
+        it), and a failure is only logged.
+        """
+        if self.is_connected(service_name):
+            return True
+        if self._client.registry.lookup(service_name) is None:
+            return False
+        try:
+            self.call(service_name, "getNumberOfRows")
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Could not connect to list window %s: %s", service_name, exc)
+            return False
+        return self.is_connected(service_name)
 
     def call(self, service_name: str, method: str, *args: Any, trace: bool = False) -> Any:
         """Call a ``ListWindowBackend`` (or with ``trace``, ``TraceListWindowBackend``) method."""

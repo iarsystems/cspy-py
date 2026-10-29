@@ -54,6 +54,28 @@ also by the MCP server. The others are useful to know when a call fails.
   started with that argument. *Handled:* in managed mode `configure()` starts
   CSpyServer2 with the configuration's core count. In standalone mode the
   configure error says what is missing.
+- **IDE platforms before 9.5 have no launch-configuration API.** The
+  CSpyServer2 of EWARM 9.70.4 (platform 9.4.7) answers
+  `resolveLaunchConfiguration`, `configureSession` and `startSMPSession`
+  with `TApplicationException: Invalid method name`. The VS Code extension
+  starts those with its legacy init sequence. *Handled:* `configure()` falls
+  back to it when resolving finds no such method, and `start()` then calls
+  `startSession`, the device macros, `flashModule`, the setup macros and
+  `loadModuleWithOptions`. That needs the installation's driver libraries:
+  the managed backend's `iar_path`, or `workbenchPath` in the launch
+  configuration.
+- **On those platforms a pause leaves registers empty unless a context
+  window is open.** Seen on 9.4.7 with a J-Link target: after `stop()` (or
+  an attach, which halts the core the same way) the core is halted, but
+  every register reads back empty and the context is `[PC = 0x0]` until the
+  next breakpoint; a simulator is not affected. The IDE and the VS Code
+  extension always have the call stack and register windows open, and with
+  those connected the context follows every stop. *Handled:* in managed
+  mode the legacy start connects `WIN_CALL_STACK` and `WIN_REGISTER_1`. The
+  halt an attach itself makes still reads empty; the next stop does not.
+- **A list window keeps calling the frontend that connected to it.** A
+  process that connected one and then exited leaves CSpyServer2 calling a
+  dead listener, and it has been seen to crash on the next `go`.
 - **A crashed CSpyServer2 takes the session with it.** *Handled:* in managed
   mode it is replaced on the next call, and calls that needed the old session
   raise `SessionError` with its last output, rather than failing against a

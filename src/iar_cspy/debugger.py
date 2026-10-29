@@ -16,6 +16,7 @@ import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
 
+from . import _legacy
 from ._session import requires_session
 from ._thrift import to_plain
 from .backend import MULTICORE_OPTION
@@ -32,7 +33,15 @@ log = logging.getLogger(__name__)
 
 #: Debugger methods that make sense before a session has started.
 PRE_SESSION_METHODS = frozenset(
-    {"getVersionString", "isOnline", "resolveLaunchConfiguration", "configureSession", "startSMPSession", "stopSession"}
+    {
+        "getVersionString",
+        "isOnline",
+        "resolveLaunchConfiguration",
+        "configureSession",
+        "startSMPSession",
+        "startSession",
+        "stopSession",
+    }
 )
 
 #: Default timeout, in seconds, of the run-control waits.
@@ -89,6 +98,9 @@ class Debugger:
         #: The resolved ``shared.LaunchConfiguration`` of the configured
         #: session (None when attached, or without a session).
         self.launch_configuration: Any = None
+        #: The launch configuration, when the backend has no launch-configuration
+        #: API and :meth:`start` must use the legacy sequence.
+        self._legacy_launch: LaunchConfig | None = None
         #: What ended the session, when the backend reported a fatal error.
         self._fatal_error: str | None = None
         client.events.subscribe(self._on_event)
@@ -220,6 +232,7 @@ class Debugger:
     def _reset_state(self) -> None:
         self.set_state(configured=False, started=False)
         self.launch_configuration = None
+        self._legacy_launch = None
         self._client.clear_session_caches()
         # A backend read of target stdin that is still waiting would block
         # the next session's kernel thread.
@@ -297,12 +310,27 @@ class Debugger:
         For a multicore configuration (``--multicore_nr_of_cores=N``) a
         managed CSpyServer2 started for another core count is replaced first:
         it needs the count on its command line.
+
+        A backend without the launch-configuration API (IDE platforms before
+        9.5, e.g. EWARM 9.70.4) is configured here only; :meth:`start` then
+        starts it the way the VS Code extension does (see ``_legacy``).
         """
         config = LaunchConfig.coerce(launch)
         if "driverOptions" in config:
             # Before resolving, so that it resolves in a process with the right arguments.
             self._client.backend.use_core_count(core_count(config))
-        self._configure(lambda: self._call("resolveLaunchConfiguration", config.to_json()))
+        self._configure(lambda: self._resolve(config))
+
+    def _resolve(self, config: LaunchConfig) -> Any:
+        try:
+            return self._call("resolveLaunchConfiguration", config.to_json())
+        except CSpyError as exc:
+            if not _legacy.missing_method(exc, "resolveLaunchConfiguration"):
+                raise
+        log.info("The backend has no resolveLaunchConfiguration; using the legacy session start.")
+        resolved = _legacy.launch_configuration(self._client, config)
+        self._legacy_launch = config
+        return resolved
 
     def configure_resolved(self, launch_configuration: Any) -> None:
         """Configure from an already resolved ``shared.LaunchConfiguration``.
@@ -315,13 +343,15 @@ class Debugger:
         cores = 1
         with self._lock:
             self._fatal_error = None
+        self._legacy_launch = None
         try:
             self._client.ensure_callbacks()
             resolved = resolve()
             cores = core_count(resolved)
             if self._client.backend.use_core_count(cores):
                 self._client.ensure_callbacks()  # a new process, maybe with a registry of its own
-            self._call("configureSession", resolved)
+            if self._legacy_launch is None:
+                self._call("configureSession", resolved)
             self.launch_configuration = resolved
         except Exception as exc:  # noqa: BLE001
             self._reset_state()
@@ -340,12 +370,15 @@ class Debugger:
         self.set_state(configured=True, started=False)
 
     def start(self) -> None:
-        """Start the configured session (``startSMPSession``)."""
+        """Start the configured session (``startSMPSession``, or the legacy sequence)."""
         if not self.state["configured"]:
             raise SessionError("start() requires a configured session: call configure(launch) first.")
         try:
             self._client.ensure_callbacks()
-            self._call("startSMPSession")
+            if self._legacy_launch is not None:
+                _legacy.start(self._client, self._legacy_launch, self.launch_configuration)
+            else:
+                self._call("startSMPSession")
         except Exception as exc:  # noqa: BLE001
             self.set_state(started=False)
             raise with_context(
