@@ -242,3 +242,24 @@ def test_a_list_window_that_fails_to_connect_is_not_an_error(monkeypatch):
 
     monkeypatch.setattr(client.listwindows, "call", refuse)
     assert client.listwindows.connect("WIN_CALL_STACK") is False
+
+
+def test_an_attach_resumes_the_core_it_halted(fake, launch):
+    client, rpc = fake
+    old_backend(rpc).on("debugger", "go", None)
+    client.debugger.configure_and_start({**launch, "request": "attach"})
+    assert rpc.methods()[-1] == "go"
+
+
+def test_an_attach_with_stop_on_entry_stays_halted(fake, launch):
+    client, rpc = fake
+    old_backend(rpc).on("debugger", "go", None)
+    client.debugger.configure_and_start({**launch, "request": "attach", "stopOnEntry": True})
+    assert "go" not in rpc.methods()
+
+
+def test_a_launch_without_a_symbol_is_not_resumed(fake, launch):
+    client, rpc = fake
+    old_backend(rpc).on("debugger", "go", None)
+    client.debugger.configure_and_start(launch)
+    assert "go" not in rpc.methods()

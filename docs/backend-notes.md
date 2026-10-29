@@ -73,6 +73,10 @@ also by the MCP server. The others are useful to know when a call fails.
   those connected the context follows every stop. *Handled:* in managed
   mode the legacy start connects `WIN_CALL_STACK` and `WIN_REGISTER_1`. The
   halt an attach itself makes still reads empty; the next stop does not.
+- **Attaching halts the core.** C-SPY stops a hardware target to attach,
+  whatever `leaveTargetRunning` says; the IDE and the VS Code extension
+  resume it straight away. *Handled:* `configure_and_start()` resumes an
+  attach that has no `stopOnSymbol`, unless `stopOnEntry` is set.
 - **A list window keeps calling the frontend that connected to it.** A
   process that connected one and then exited leaves CSpyServer2 calling a
   dead listener, and it has been seen to crash on the next `go`.
