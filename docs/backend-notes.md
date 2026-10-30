@@ -10,6 +10,16 @@ also by the MCP server. The others are useful to know when a call fails.
   single start/stop cycle per process. *Handled:* in managed mode,
   `stop_session()` shuts the process down and `configure_and_start()` always
   begins with a fresh one.
+- **Products before IDE platform 9.5 (e.g. EWARM 9.70) cannot resolve a
+  launch configuration**: they lack `resolveLaunchConfiguration`,
+  `configureSession` and `startSMPSession` (Thrift `UNKNOWN_METHOD`, raised as
+  `UnsupportedMethod`). *Handled:* `configure()` then builds the
+  `cspy.SessionConfiguration` itself from the installation's target
+  libraries, and `start()` runs `startSession`, the device macros, the flash
+  loader, the setup macros and `loadModuleWithOptions`, as the VS Code
+  extension does (`_legacy_launch.py`). The launch configuration needs
+  `driverOptions`, and the installation must be known (`iar_path`, or
+  `workbenchPath` in the launch configuration).
 - **Clients end a session with `Debugger.exit()`, not `stopSession`.**
   cspy.thrift deprecates calling `stopSession` directly: `exit()` stops the
   session itself, and CSpyServer2 then exits (code 0). The VS Code extension

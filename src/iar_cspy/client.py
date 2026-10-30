@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from thriftpy2.rpc import make_client
+from thriftpy2.thrift import TApplicationException
 
 from . import _thrift
 from .backend import Backend
@@ -27,6 +28,7 @@ from .debugger import Debugger
 from .errors import (
     BackendError,
     CSpyError,
+    UnsupportedMethod,
     classify,
     cspy_exception_info,
     describe_cspy_exception,
@@ -251,6 +253,11 @@ class Client:
         return result
 
     def _convert_error(self, label: str, method: str, exc: Exception, elapsed_ms: float) -> CSpyError:
+        if isinstance(exc, TApplicationException) and exc.type == TApplicationException.UNKNOWN_METHOD:
+            # An older product: not a backend fault, so no diagnostics.
+            return UnsupportedMethod(
+                f"The backend does not implement {label}.{method} (an older IAR product): {exc}", method
+            )
         info = cspy_exception_info(exc)
         text = describe_cspy_exception(info) if info is not None else f"Thrift RPC failed: {type(exc).__name__}: {exc}"
         log.debug("error %s.%s after %.1fms: %s", label, method, elapsed_ms, _safe_repr(text))

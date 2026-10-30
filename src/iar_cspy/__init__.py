@@ -30,7 +30,7 @@ from .client import Client, connect, launch
 from .config import Config
 from .context import ContextManager
 from .debugger import Debugger
-from .errors import BackendError, CSpyError, CSpyExceptionInfo, SessionError, WaitTimeout, classify
+from .errors import BackendError, CSpyError, CSpyExceptionInfo, SessionError, UnsupportedMethod, WaitTimeout, classify
 from .events import Events
 from .launch import LaunchConfig
 from .listwindow import ListWindow, ListWindows, TraceWindow
@@ -109,6 +109,7 @@ __all__ = [
     "TerminalOutput",
     "TraceStatus",
     "TraceWindow",
+    "UnsupportedMethod",
     "VisibleSymbols",
     "WaitResult",
     "WaitTimeout",

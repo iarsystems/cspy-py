@@ -37,6 +37,8 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
   options, the `live` marker. Registered through a `pytest11` entry point, so
   it loads wherever the package is installed (not through `pytest.ini`).
 - `_session.py`: `requires_session`, the package's session guard.
+- `_legacy_launch.py`: session configuration and launch sequence for
+  products without `resolveLaunchConfiguration`.
 
 Also: `examples/firmware/` is the simulator program + launch.json
 used by the live tests and demos. `docs/` holds the usage guide, IDE services
@@ -80,6 +82,10 @@ Important behavior:
   `kDkInspectionContextChanged`, which the backend posts after the stop.
 - Target stdin reads (libsupport `requestInputBinary`) wait for
   `terminal.send()`, as at a console; ending the session releases them.
+- Products before IDE platform 9.5 lack `resolveLaunchConfiguration`; on
+  `UnsupportedMethod`, `configure()` falls back to the legacy launch sequence
+  (`_legacy_launch.py`, ported from the VS Code extension's
+  `runLegacyInitSequence`). Test it against `/opt/iar/cxarm-9.70.1`.
 
 ## Breakpoint Guidance (Important)
 `add_source(file, line)`, `add_code(location, mode)`, `add_data(location,

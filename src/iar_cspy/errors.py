@@ -40,6 +40,18 @@ class SessionError(CSpyError):
     """An operation was attempted in the wrong debug-session lifecycle state."""
 
 
+class UnsupportedMethod(CSpyError):
+    """The backend does not implement an RPC: it is from an older IAR product.
+
+    ``method`` is the RPC name. Code that has a fallback for older products
+    (the launch sequence does) catches this.
+    """
+
+    def __init__(self, message: str, method: str, *, diagnostics: str = "") -> None:
+        super().__init__(message, diagnostics=diagnostics)
+        self.method = method
+
+
 class WaitTimeout(CSpyError):
     """A wait for a core state ran out of time."""
 
@@ -122,6 +134,12 @@ ERROR_CODES: list[dict[str, Any]] = [
         "description": "Debugger reported kDcLicenseViolation (typically license/token/entitlement issues).",
     },
     {
+        "code": "UNSUPPORTED_METHOD",
+        "category": "compatibility",
+        "retryable": False,
+        "description": "The backend does not implement the RPC (an older IAR product).",
+    },
+    {
         "code": "UNKNOWN_ERROR",
         "category": "unknown",
         "retryable": False,
@@ -190,6 +208,8 @@ def with_context(exc: BaseException, message: str) -> CSpyError:
         return BackendError(message, info, diagnostics=diagnostics)
     if isinstance(exc, SessionError):
         return SessionError(message, diagnostics=diagnostics)
+    if isinstance(exc, UnsupportedMethod):
+        return UnsupportedMethod(message, exc.method, diagnostics=diagnostics)
     return CSpyError(message, diagnostics=diagnostics)
 
 
@@ -303,6 +323,8 @@ def classify(
 
     if isinstance(exc, SessionError) or "requires an active debug session" in low:
         return entry(code="SESSION_NOT_STARTED", category="lifecycle", message=text, retryable=False)
+    if isinstance(exc, UnsupportedMethod):
+        return entry(code="UNSUPPORTED_METHOD", category="compatibility", message=text, retryable=False)
 
     # A result code the backend reported is the most specific answer; the
     # text checks below would also match words in its message.

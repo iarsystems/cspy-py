@@ -16,11 +16,12 @@ import time
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
 
+from . import _legacy_launch
 from ._session import requires_session
 from ._thrift import to_plain
 from .backend import MULTICORE_OPTION
 from .context import ContextLike, context_ref
-from .errors import CSpyError, SessionError, WaitTimeout, cspy_exception_info, describe, error_entry, with_context
+from .errors import CSpyError, SessionError, UnsupportedMethod, WaitTimeout, cspy_exception_info, describe, error_entry, with_context
 from .events import FATAL_ERROR_NOTES
 from .launch import LaunchConfig
 from .types import CleanupResult, CoreState, Register, RegisterSnapshot, StartResult, StopResult, WaitResult
@@ -32,7 +33,15 @@ log = logging.getLogger(__name__)
 
 #: Debugger methods that make sense before a session has started.
 PRE_SESSION_METHODS = frozenset(
-    {"getVersionString", "isOnline", "resolveLaunchConfiguration", "configureSession", "startSMPSession", "stopSession"}
+    {
+        "getVersionString",
+        "isOnline",
+        "resolveLaunchConfiguration",
+        "configureSession",
+        "startSMPSession",
+        "startSession",
+        "stopSession",
+    }
 )
 
 #: Default timeout, in seconds, of the run-control waits.
@@ -89,6 +98,9 @@ class Debugger:
         #: The resolved ``shared.LaunchConfiguration`` of the configured
         #: session (None when attached, or without a session).
         self.launch_configuration: Any = None
+        # Set when the backend predates resolveLaunchConfiguration: start() then
+        # runs the legacy launch sequence.
+        self._legacy: _legacy_launch.LegacyLaunch | None = None
         #: What ended the session, when the backend reported a fatal error.
         self._fatal_error: str | None = None
         client.events.subscribe(self._on_event)
@@ -220,6 +232,7 @@ class Debugger:
     def _reset_state(self) -> None:
         self.set_state(configured=False, started=False)
         self.launch_configuration = None
+        self._legacy = None
         self._client.clear_session_caches()
         # A backend read of target stdin that is still waiting would block
         # the next session's kernel thread.
@@ -297,19 +310,32 @@ class Debugger:
         For a multicore configuration (``--multicore_nr_of_cores=N``) a
         managed CSpyServer2 started for another core count is replaced first:
         it needs the count on its command line.
+
+        Products without ``resolveLaunchConfiguration`` (IDE platform before 9.5) get the
+        session configuration built here instead, as the IAR VS Code extension
+        does; :meth:`start` then runs their launch sequence. That needs
+        ``driverOptions`` in the launch configuration, and the installation
+        (``iar_path``, or ``workbenchPath`` in the launch configuration).
         """
         config = LaunchConfig.coerce(launch)
         if "driverOptions" in config:
             # Before resolving, so that it resolves in a process with the right arguments.
             self._client.backend.use_core_count(core_count(config))
-        self._configure(lambda: self._call("resolveLaunchConfiguration", config.to_json()))
+        self._configure(lambda: self._resolve(config))
+
+    def _resolve(self, config: LaunchConfig) -> tuple[_legacy_launch.LegacyLaunch | None, Any]:
+        try:
+            return None, self._call("resolveLaunchConfiguration", config.to_json())
+        except UnsupportedMethod:
+            log.info("The backend has no resolveLaunchConfiguration; using the legacy launch sequence.")
+        return _legacy_launch.resolve(config, self._client)
 
     def configure_resolved(self, launch_configuration: Any) -> None:
         """Configure from an already resolved ``shared.LaunchConfiguration``.
 
         That is what :meth:`Project.launch_configuration` returns.
         """
-        self._configure(lambda: launch_configuration)
+        self._configure(lambda: (None, launch_configuration))
 
     def _configure(self, resolve: Any) -> None:
         cores = 1
@@ -317,12 +343,14 @@ class Debugger:
             self._fatal_error = None
         try:
             self._client.ensure_callbacks()
-            resolved = resolve()
+            legacy, resolved = resolve()
             cores = core_count(resolved)
             if self._client.backend.use_core_count(cores):
                 self._client.ensure_callbacks()  # a new process, maybe with a registry of its own
-            self._call("configureSession", resolved)
+            if legacy is None:
+                self._call("configureSession", resolved)
             self.launch_configuration = resolved
+            self._legacy = legacy
         except Exception as exc:  # noqa: BLE001
             self._reset_state()
             hint = ""
@@ -340,12 +368,19 @@ class Debugger:
         self.set_state(configured=True, started=False)
 
     def start(self) -> None:
-        """Start the configured session (``startSMPSession``)."""
+        """Start the configured session (``startSMPSession``).
+
+        For a product without it (see :meth:`configure`), ``startSession``,
+        then the device macros, flash loader, setup macros and the program.
+        """
         if not self.state["configured"]:
             raise SessionError("start() requires a configured session: call configure(launch) first.")
         try:
             self._client.ensure_callbacks()
-            self._call("startSMPSession")
+            if self._legacy is not None:
+                _legacy_launch.start(self._legacy, self._call)
+            else:
+                self._call("startSMPSession")
         except Exception as exc:  # noqa: BLE001
             self.set_state(started=False)
             raise with_context(
@@ -911,7 +946,7 @@ class Debugger:
         except Exception as exc:  # noqa: BLE001
             if method == "configureSession":
                 self._reset_state()
-            elif method == "startSMPSession":
+            elif method in ("startSMPSession", "startSession"):
                 self.set_state(started=False)
             elif method == "stopSession":
                 # Probe before the reset: the probe reads the core states.
@@ -926,8 +961,8 @@ class Debugger:
         if method == "configureSession":
             self._client.clear_session_caches()
             self.set_state(configured=True, started=False)
-        elif method == "startSMPSession":
-            self.set_state(started=True)
+        elif method in ("startSMPSession", "startSession"):
+            self.set_state(configured=True, started=True)
         elif method == "stopSession":
             self._reset_state()
         return result
