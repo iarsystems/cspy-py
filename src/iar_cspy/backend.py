@@ -25,7 +25,7 @@ from typing import Any
 
 from thriftpy2.rpc import make_client
 
-from . import _thrift
+from . import _thrift, discovery
 from ._process import ManagedProcess, is_reachable
 from .config import Config
 from .errors import CSpyError
@@ -74,6 +74,9 @@ class Backend:
         #: Cores the managed CSpyServer2 is started for; see :meth:`use_core_count`.
         self.debugger_cores = 1
         self._running_cores = 1
+        #: A registry found through remote-control discovery, cached once reachable
+        #: (like an explicit registry_port, it is not re-validated per call).
+        self._discovered_endpoint: tuple[str, int] | None = None
         atexit.register(self.shutdown)
 
     @classmethod
@@ -109,18 +112,48 @@ class Backend:
     def registry_endpoint(self) -> tuple[str, int] | None:
         """The service registry to resolve services through.
 
-        In managed mode this starts or restarts the processes as needed. None
-        means there is no registry at all (standalone mode without a registry
-        port), in which case only a direct debugger endpoint can be used.
+        In managed mode this starts or restarts the processes as needed.
+        In standalone mode without an explicit registry_port, remote-control
+        discovery files are tried instead (see :mod:`iar_cspy.discovery`), but
+        only when opted into (``remote_control_enabled``, or giving a
+        ``remote_control_workspace``/``remote_control_dir``) — a bare
+        standalone Config never scans the filesystem on its own. None means
+        no registry could be found at all, in which case only a direct
+        debugger endpoint can be used.
         """
         if self.mode != "managed":
-            if self.config.registry_port is None:
-                return None
-            return self.registry_host, int(self.config.registry_port)
+            if self.config.registry_port is not None:
+                return self.registry_host, int(self.config.registry_port)
+            if self._remote_control_opted_in():
+                return self._discover_registry()
+            return None
         try:
             return self._ensure_managed()
         except Exception as exc:  # noqa: BLE001
             raise CSpyError(f"Failed to prepare the managed IAR backend: {exc}") from exc
+
+    def _remote_control_opted_in(self) -> bool:
+        cfg = self.config
+        return (
+            cfg.remote_control_enabled
+            or cfg.remote_control_workspace is not None
+            or cfg.remote_control_dir is not None
+        )
+
+    def _discover_registry(self) -> tuple[str, int] | None:
+        if self._discovered_endpoint is not None:
+            return self._discovered_endpoint
+        cfg = self.config
+        for candidate in discovery.discover(
+            cfg.remote_control_workspace,
+            cfg.remote_control_dir,
+            require_alive=cfg.remote_control_require_alive,
+        ):
+            endpoint = (candidate.registry_host, candidate.registry_port)
+            if is_reachable(*endpoint):
+                self._discovered_endpoint = endpoint
+                return endpoint
+        return None
 
     def current_registry_endpoint(self) -> tuple[str, int] | None:
         """The registry endpoint as of now, without starting anything."""

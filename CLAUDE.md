@@ -39,6 +39,12 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 - `_session.py`: `requires_session`, the package's session guard.
 - `_legacy_launch.py`: session configuration and launch sequence for
   products without `resolveLaunchConfiguration`.
+- `discovery.py`: `discover()`/`RemoteControlInfo` — find a running IDE's
+  service registry through the `*.remote` files it writes (default
+  `~/.iar/remote_control`). Opt-in only (`Config.remote_control_enabled`, or
+  giving `remote_control_workspace`/`remote_control_dir`); a bare standalone
+  `Config` never scans the filesystem on its own. `Backend._discover_registry`
+  tries candidates in turn and caches the first reachable one.
 
 Also: `examples/firmware/` is the simulator program + launch.json
 used by the live tests and demos. `docs/` holds the usage guide, IDE services
@@ -55,6 +61,9 @@ Everything has defaults; the IDL is bundled. The usual inputs:
 - `IAR_INSTALL_PATH` / `--iar-path`: IAR installation (managed mode, default).
 - `THRIFT_REGISTRY_HOST` / `THRIFT_REGISTRY_PORT` (+ `THRIFT_CSPYSERVER_MODE=standalone`):
   connect to a running backend.
+- `IAR_REMOTE_CONTROL_DISCOVERY_WORKSPACE` (standalone mode, no `THRIFT_REGISTRY_PORT`):
+  find the registry via remote-control discovery files instead, narrowed to
+  IDEs running that workspace. See `discovery.py`.
 See `.env.example` for the rest.
 
 ## Runtime Architecture

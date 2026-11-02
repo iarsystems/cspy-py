@@ -409,15 +409,29 @@ def _given(**values: Any) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
 
 
-def connect(registry_port: int | None = None, registry_host: str | None = None, **config: Any) -> Client:
+def connect(
+    registry_port: int | None = None,
+    registry_host: str | None = None,
+    *,
+    workspace: str | None = None,
+    **config: Any,
+) -> Client:
     """Connect to an already-running backend through its service registry.
 
     Arguments not given come from the environment (``THRIFT_REGISTRY_PORT``,
     ``THRIFT_REGISTRY_HOST``, ...; see :meth:`Config.from_env`). Nothing is
     started, and closing the client leaves the backend running.
+
+    Without ``registry_port``, the registry is instead looked up through
+    remote-control discovery files (``~/.iar/remote_control/*.remote`` by
+    default, or the Windows equivalent; see :mod:`iar_cspy.discovery`).
+    ``workspace``, a path to an IDE
+    workspace/project, narrows that search to IDEs running it.
     """
     cfg = Config.from_env(
-        mode="standalone", **_given(registry_port=registry_port, registry_host=registry_host), **config
+        mode="standalone",
+        **_given(registry_port=registry_port, registry_host=registry_host, remote_control_workspace=workspace),
+        **config,
     )
     return Client(Backend(cfg), owns_backend=False)
 

@@ -203,6 +203,21 @@ print(client.breakpoints.all())           # the IDE's session: do not stop it fr
 through without configuring or starting anything. Waits fall back to polling
 the core state, because the IDE receives the debug events.
 
+### Attach without knowing the port
+
+If you don't know the registry port, `cspy.connect(workspace=...)` finds it
+through the `*.remote` discovery files a running IDE writes (default
+`~/.iar/remote_control/*.remote`, or the Windows equivalent), narrowed to IDEs running that workspace:
+
+```python
+client = cspy.connect(workspace="/path/to/project.eww")
+client.debugger.attach()
+```
+
+Without a `workspace`, pass `remote_control_enabled=True` to try every
+discovered, live registry in turn (newest first) until one answers. This is
+opt-in: a bare `cspy.connect()` with no port never scans the filesystem.
+
 ### Anything not wrapped
 
 ```python
