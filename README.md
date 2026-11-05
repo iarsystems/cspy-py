@@ -104,6 +104,7 @@ we recommend using the latest IAR product version for your architecture, if poss
 | `client.ide_services` | Hosting ProjectManager/OptionsService: `status`, `ensure`. |
 | `client.raw("debugger")` | Any RPC the typed layer does not wrap: `client.raw("debugger").getAllZones()`. |
 | `client.capabilities()` | What the backend offers right now, without raising. |
+| `iar_cspy.cli` | `add_connection_arguments(parser)`/`config_from_args(args)` — the standard CLI flags for `Config`, for any tool built on this package. `parse_config()` for a tool with no flags of its own. |
 
 Backend data comes back as the IDL's thriftpy2 struct objects, with attribute
 access (`bp.id`, `frame.functionName`, `value.type`); `cspy.to_plain(x)`

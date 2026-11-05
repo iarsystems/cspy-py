@@ -49,6 +49,11 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
   — the `thrift://host:port` string `Config.registry_uri` and
   `RemoteControlInfo.registry_uri` both use, instead of separate host/port
   fields.
+- `cli.py`: `add_connection_arguments()`/`config_from_args()`/`parse_config()`
+  — the standard `argparse` CLI for `Config` (public, for any tool built on
+  `iar_cspy`, not just this package's own scripts/pytest plugin — those still
+  have their own older, narrower `--cspy-*`/`--iar-path` flags, not yet
+  switched over to this).
 
 Also: `examples/firmware/` is the simulator program + launch.json
 used by the live tests and demos. `docs/` holds the usage guide, connecting,
