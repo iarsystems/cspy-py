@@ -40,6 +40,10 @@ class SessionError(CSpyError):
     """An operation was attempted in the wrong debug-session lifecycle state."""
 
 
+class NotConnectedError(CSpyError):
+    """No service registry could be resolved right now (see the message for which recipe was tried)."""
+
+
 class UnsupportedMethod(CSpyError):
     """The backend does not implement an RPC: it is from an older IAR product.
 

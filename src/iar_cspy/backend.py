@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import atexit
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,11 @@ from thriftpy2.rpc import make_client
 from . import _thrift, discovery
 from ._process import ManagedProcess, is_reachable
 from .config import Config
-from .errors import CSpyError
+from .errors import CSpyError, NotConnectedError
+from .registry_uri import format_registry_uri, parse_registry_uri
+
+#: How often :meth:`Backend.wait_for_registry` re-checks :meth:`Backend.registry_endpoint`.
+WAIT_POLL_INTERVAL_S = 1.0
 
 #: The driver option (and CSpyServer2 argument) giving a multicore session's core count.
 MULTICORE_OPTION = "--multicore_nr_of_cores="
@@ -36,6 +41,20 @@ MULTICORE_OPTION = "--multicore_nr_of_cores="
 #: How long a managed CSpyServer2 gets to exit after ``Debugger.exit()``
 #: before it is terminated (the VS Code extension waits as long).
 DEBUGGER_EXIT_TIMEOUT_S = 15.0
+
+
+def remote_control_opted_in(config: Config) -> bool:
+    """Whether ``config`` asks for remote-control discovery at all.
+
+    Opt-in only (``remote_control_enabled``, or giving a ``remote_control_workspace``/
+    ``remote_control_dir``) — a bare standalone ``Config`` never scans the
+    filesystem on its own.
+    """
+    return (
+        config.remote_control_enabled
+        or config.remote_control_workspace is not None
+        or config.remote_control_dir is not None
+    )
 
 
 class Backend:
@@ -50,7 +69,7 @@ class Backend:
         self._lock = threading.RLock()
         self.debugger_process = ManagedProcess(
             "CSpyServer2",
-            host=self.registry_host,
+            host=self._registry_host,
             start_timeout_ms=self.config.cspy_start_timeout_ms,
             restart_on_failure=self.config.cspy_restart_on_failure,
             terminate_timeout_s=3.0,
@@ -59,23 +78,27 @@ class Backend:
         )
         self.launcher_process = ManagedProcess(
             "IarServiceLauncher",
-            host=self.registry_host,
+            host=self._registry_host,
             start_timeout_ms=self.config.launcher_start_timeout_ms,
             restart_on_failure=self.config.launcher_restart_on_failure,
             terminate_timeout_s=10.0,
         )
         #: IDE service key -> manifest handed to the launcher's ServiceManager.
         self.loaded_manifests: dict[str, str] = {}
-        #: Incremented whenever a new IarServiceLauncher process is started.
-        self.launcher_generation = 0
         #: Incremented whenever a new CSpyServer2 process is started: a debug
-        #: session does not survive into the next one.
+        #: session does not survive into the next one. Needed alongside the
+        #: registry endpoint for debugger.py's session tracking: a CSpyServer2
+        #: that joins a launcher's registry just echoes that launcher's port
+        #: back unchanged, so the endpoint alone can't tell it was replaced. A
+        #: restarted launcher, in contrast, always gets a fresh port (it
+        #: creates its own registry rather than joining one), so nothing
+        #: equivalent is needed for the launcher/IDE-services side.
         self.debugger_generation = 0
         #: Cores the managed CSpyServer2 is started for; see :meth:`use_core_count`.
         self.debugger_cores = 1
         self._running_cores = 1
         #: A registry found through remote-control discovery, cached once reachable
-        #: (like an explicit registry_port, it is not re-validated per call).
+        #: (like an explicit registry_uri, it is not re-validated per call).
         self._discovered_endpoint: tuple[str, int] | None = None
         atexit.register(self.shutdown)
 
@@ -85,9 +108,22 @@ class Backend:
         return cls(Config(mode="managed", iar_path=iar_path, **config))
 
     @classmethod
-    def standalone(cls, registry_port: int, registry_host: str = "127.0.0.1", **config: Any) -> Backend:
+    def standalone(
+        cls,
+        registry_port: int | None = None,
+        registry_host: str = "127.0.0.1",
+        *,
+        registry_uri: str | None = None,
+        **config: Any,
+    ) -> Backend:
         """A backend someone else runs, reached through its service registry."""
-        return cls(Config(mode="standalone", registry_host=registry_host, registry_port=registry_port, **config))
+        if registry_port is not None:
+            if registry_uri is not None:
+                raise TypeError("standalone() got both registry_port and registry_uri; give one")
+            registry_uri = format_registry_uri(registry_host, registry_port)
+        elif registry_uri is None:
+            raise TypeError("standalone() needs registry_port or registry_uri")
+        return cls(Config(mode="standalone", registry_uri=registry_uri, **config))
 
     def __enter__(self) -> Backend:
         return self
@@ -102,43 +138,96 @@ class Backend:
         return self.config.mode
 
     @property
-    def registry_host(self) -> str:
-        return self.config.registry_host or "127.0.0.1"
+    def _registry_host(self) -> str:
+        """The host this backend's own managed processes bind their registry to.
+
+        Unrelated to a standalone target's host, which is part of
+        ``Config.registry_uri`` — this is only ever loopback in practice, and
+        private: nothing outside this class should care which host its own
+        managed processes happen to bind to.
+        """
+        return "127.0.0.1"
 
     @property
     def has_launcher(self) -> bool:
         return self.mode == "managed" and self.config.launcher_executable is not None
 
-    def registry_endpoint(self) -> tuple[str, int] | None:
-        """The service registry to resolve services through.
+    @property
+    def registry_configured(self) -> bool:
+        """Whether a registry (or a managed backend) is configured at all.
 
-        In managed mode this starts or restarts the processes as needed.
-        In standalone mode without an explicit registry_port, remote-control
-        discovery files are tried instead (see :mod:`iar_cspy.discovery`), but
-        only when opted into (``remote_control_enabled``, or giving a
-        ``remote_control_workspace``/``remote_control_dir``) — a bare
-        standalone Config never scans the filesystem on its own. None means
-        no registry could be found at all, in which case only a direct
-        debugger endpoint can be used.
+        A static fact, not a live check — used only to decide the one
+        legitimate case for a direct ``Config.host``/``port`` debugger
+        endpoint (:meth:`~iar_cspy.Client.endpoint`), and to short-circuit
+        :meth:`wait_for_registry` when there is nothing to wait for.
+        """
+        return self.mode == "managed" or self.config.registry_uri is not None or remote_control_opted_in(self.config)
+
+    def registry_endpoint(self) -> tuple[str, int] | None:
+        """The service registry to resolve services through: find it, fresh, every call.
+
+        Three ways to find one, one tried per ``Config``:
+          - managed: start or restart the managed processes as needed.
+          - a designated ``registry_uri``: used unconditionally, no reachability
+            check (a real RPC against it fails clearly enough if it's down; see
+            :meth:`wait_for_registry` for a version that does wait for it).
+          - remote-control discovery (see :mod:`iar_cspy.discovery`), opted
+            into via ``remote_control_enabled``/``remote_control_workspace``/
+            ``remote_control_dir`` — a bare standalone Config never scans the
+            filesystem on its own.
+
+        None means no registry could be found at all right now. A discovered
+        endpoint is cached once reachable (re-scanning and re-probing on every
+        RPC would be wasteful); call :meth:`forget_registry` to drop that
+        cache once it's known to be stale - :meth:`~iar_cspy.Client.endpoint`
+        does this on a failed resolve, so the *next* call looks again rather
+        than repeating the same dead attempt forever. A designated
+        ``registry_uri`` or a managed backend have nothing to forget: the
+        former is never cached, the latter already self-heals every call.
         """
         if self.mode != "managed":
-            if self.config.registry_port is not None:
-                return self.registry_host, int(self.config.registry_port)
-            if self._remote_control_opted_in():
+            if self.config.registry_uri is not None:
+                return parse_registry_uri(self.config.registry_uri)
+            if remote_control_opted_in(self.config):
                 return self._discover_registry()
             return None
         try:
-            return self._ensure_managed()
+            return self.launch_services()
         except Exception as exc:  # noqa: BLE001
             raise CSpyError(f"Failed to prepare the managed IAR backend: {exc}") from exc
 
-    def _remote_control_opted_in(self) -> bool:
-        cfg = self.config
-        return (
-            cfg.remote_control_enabled
-            or cfg.remote_control_workspace is not None
-            or cfg.remote_control_dir is not None
-        )
+    def wait_for_registry(self, timeout_s: float, poll_interval_s: float = WAIT_POLL_INTERVAL_S) -> tuple[str, int]:
+        """Block until :meth:`registry_endpoint` answers, or raise :class:`NotConnectedError`.
+
+        Unlike ``registry_endpoint()``, a designated ``registry_uri`` is
+        actively probed for reachability here - this is the one place that
+        happens, used by ``connect(discovery_timeout=...)`` rather than on
+        every RPC (which would turn a merely slow backend into a slow call,
+        and would make a lot of unit tests that point at a Config with no
+        real listener behind it return None instead of the plain endpoint).
+        """
+        if not self.registry_configured:
+            raise NotConnectedError(
+                "no registry configured (registry_uri, remote-control discovery) and no "
+                "direct debugger endpoint override"
+            )
+        if self.mode == "managed":
+            return self.registry_endpoint()
+
+        deadline = time.monotonic() + timeout_s
+        while True:
+            if self.config.registry_uri is not None:
+                endpoint = parse_registry_uri(self.config.registry_uri)
+                if is_reachable(*endpoint):
+                    return endpoint
+            else:
+                endpoint = self._discover_registry()
+                if endpoint is not None:
+                    return endpoint
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise NotConnectedError(f"Timed out after {timeout_s:g}s waiting for a registry")
+            time.sleep(min(poll_interval_s, remaining))
 
     def _discover_registry(self) -> tuple[str, int] | None:
         if self._discovered_endpoint is not None:
@@ -149,11 +238,22 @@ class Backend:
             cfg.remote_control_dir,
             require_alive=cfg.remote_control_require_alive,
         ):
-            endpoint = (candidate.registry_host, candidate.registry_port)
+            endpoint = parse_registry_uri(candidate.registry_uri)
             if is_reachable(*endpoint):
                 self._discovered_endpoint = endpoint
                 return endpoint
         return None
+
+    def forget_registry(self) -> None:
+        """Drop a cached discovery result, so the next lookup looks again.
+
+        Call after a service registry at a previously-resolved endpoint turns
+        out to be gone (the IDE closed, a hand-started CSpyServer2 exited) -
+        :meth:`~iar_cspy.Client.endpoint` does this on a failed resolve. A
+        no-op in managed mode or with an explicit ``registry_uri`` (nothing
+        cached to forget either way).
+        """
+        self._discovered_endpoint = None
 
     def current_registry_endpoint(self) -> tuple[str, int] | None:
         """The registry endpoint as of now, without starting anything."""
@@ -161,13 +261,20 @@ class Backend:
             return self.registry_endpoint()
         owner = self.launcher_process if self.has_launcher else self.debugger_process
         port = owner.registry_port
-        return (self.registry_host, int(port)) if port else None
+        return (self._registry_host, int(port)) if port else None
 
     def start(self) -> tuple[str, int] | None:
         """Bring the backend up now rather than on first use."""
         return self.registry_endpoint()
 
-    def _ensure_managed(self) -> tuple[str, int]:
+    def launch_services(self) -> tuple[str, int]:
+        """Start the managed processes (if not already) and return their registry endpoint.
+
+        The "start your own" find-strategy: restarts an unhealthy process on
+        every call (``ManagedProcess.ensure()``/``healthy()``), same as the
+        other two strategies get re-tried fresh by :meth:`registry_endpoint`
+        on every call.
+        """
         cfg = self.config
         with self._lock:
             join_port: int | None = None
@@ -181,12 +288,11 @@ class Backend:
                 )
                 if self.launcher_process.process is not before:
                     # A new launcher hosts none of the services the old one did.
-                    self.launcher_generation += 1
                     self.loaded_manifests.clear()
                 if cfg.cspy_executable is None:
                     # No debugger at that path: project/options work, and the
                     # debugger fails to resolve with a clear registry error.
-                    return self.registry_host, join_port
+                    return self._registry_host, join_port
 
             exe = cfg.cspy_executable
             if exe is None:
@@ -209,7 +315,7 @@ class Backend:
                     f"CSpyServer2 was asked to join registry port {join_port} but reported "
                     f"port {port}; it did not attach to the IarServiceLauncher registry"
                 )
-            return self.registry_host, port
+            return self._registry_host, port
 
     def _prune_stale_registrations(self, port: int) -> None:
         """Deregister services whose endpoints are gone from the launcher's registry.
@@ -220,7 +326,7 @@ class Backend:
         """
         registry_cls = _thrift.Idl(self.config.thrift_file, self.config.include_dirs).registry.CSpyServiceRegistry
         try:
-            client = make_client(registry_cls, self.registry_host, port, timeout=self.config.timeout_ms)
+            client = make_client(registry_cls, self._registry_host, port, timeout=self.config.timeout_ms)
         except Exception:  # noqa: BLE001 - best effort; resolution reports real problems
             return
         try:
@@ -281,7 +387,7 @@ class Backend:
         if port is None:
             return False
         idl = _thrift.Idl(self.config.thrift_file, self.config.include_dirs)
-        registry = make_client(idl.registry.CSpyServiceRegistry, self.registry_host, int(port), timeout=2000)
+        registry = make_client(idl.registry.CSpyServiceRegistry, self._registry_host, int(port), timeout=2000)
         try:
             location = registry.waitForService(self.config.registry_service_name, 1000)
         finally:

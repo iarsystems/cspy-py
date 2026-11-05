@@ -456,7 +456,7 @@ def test_status(fake):
     status = client.debugger.status()
     assert status["backend_online"] is True
     assert status["core_states"] == [0, 1]
-    assert status["registry_port"] == 4711
+    assert status["registry_uri"] == "thrift://127.0.0.1:4711"
 
 
 class NamedLocation:

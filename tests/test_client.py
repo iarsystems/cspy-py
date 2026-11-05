@@ -11,7 +11,7 @@ from iar_cspy.testing import cspy_exception
 
 @pytest.fixture()
 def client(monkeypatch):
-    client = Client(Config(mode="standalone", registry_port=4711))
+    client = Client(Config(mode="standalone", registry_uri="thrift://127.0.0.1:4711"))
     monkeypatch.setattr(client.backend, "diagnostics_text", lambda: "backend diagnostics")
     return client
 
@@ -125,13 +125,9 @@ def test_connect_reads_the_environment(monkeypatch):
     monkeypatch.setenv("THRIFT_REGISTRY_PORT", "5000")
     monkeypatch.setenv("THRIFT_REGISTRY_HOST", "10.0.0.5")
     client = iar_cspy.connect()
-    assert (client.config.mode, client.config.registry_host, client.config.registry_port) == (
-        "standalone",
-        "10.0.0.5",
-        5000,
-    )
+    assert (client.config.mode, client.config.registry_uri) == ("standalone", "thrift://10.0.0.5:5000")
     assert not client.owns_backend
-    assert iar_cspy.connect(6000).config.registry_port == 6000
+    assert iar_cspy.connect(6000).config.registry_uri == "thrift://127.0.0.1:6000"
 
 
 def test_a_client_owns_the_backend_it_created():

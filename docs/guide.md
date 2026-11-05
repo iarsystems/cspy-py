@@ -25,8 +25,10 @@ pip install "iar-cspy @ git+https://github.com/iarsystems/cspy-py"
 - A **backend** is the set of IAR processes hosting the services:
   CSpyServer2 for debugging, IarServiceLauncher for projects and options. A
   managed backend (`iar_cspy.launch(iar_path)`) is started and restarted for
-  you. A standalone one (`iar_cspy.connect(registry_port)`) is someone
-  else's. [Backend modes](../README.md#backend-modes) has the details.
+  you. A standalone one (`iar_cspy.connect(...)`) is someone else's, usually
+  found through remote-control discovery rather than a port you already know
+  — see [Attach without knowing the port](#attach-without-knowing-the-port)
+  below. [Backend modes](../README.md#backend-modes) has the details.
 - A **client** is your connection to it. Everything hangs off the client, and
   closing it stops a managed backend.
 - A **session** is one debug session: configure (from a launch
@@ -205,18 +207,37 @@ the core state, because the IDE receives the debug events.
 
 ### Attach without knowing the port
 
-If you don't know the registry port, `cspy.connect(workspace=...)` finds it
-through the `*.remote` discovery files a running IDE writes (default
-`~/.iar/remote_control/*.remote`, or the Windows equivalent), narrowed to IDEs running that workspace:
+Without a port (or `registry_uri=`), `cspy.connect()` looks for the registry
+itself, through the `*.remote` discovery files a running IDE writes (default
+`~/.iar/remote_control/*.remote`, or the Windows equivalent) — usually there's
+exactly one IDE session to find:
 
 ```python
-client = cspy.connect(workspace="/path/to/project.eww")
+client = cspy.connect()                           # tries every live, discovered registry
+client = cspy.connect(workspace="/path/to/project.eww")  # narrowed to IDEs running it
 client.debugger.attach()
 ```
 
-Without a `workspace`, pass `remote_control_enabled=True` to try every
-discovered, live registry in turn (newest first) until one answers. This is
-opt-in: a bare `cspy.connect()` with no port never scans the filesystem.
+Pass `remote_control_enabled=False` to opt out and fall back to the plain
+direct debugger endpoint (`host`/`port`) instead.
+
+### Waiting for a backend that isn't up yet
+
+A discovered (or explicitly configured) registry might not be reachable yet —
+the IDE is still starting. By default that surfaces as a
+`cspy.NotConnectedError` on first use (`client.debugger.attach()`, any RPC),
+same as a plain misconfiguration would. To wait instead, pass
+`discovery_timeout` — distinct from `timeout_ms`, the per-RPC connection
+timeout once a registry *is* known:
+
+```python
+client = cspy.connect(discovery_timeout=30)   # blocks up to 30s for a live registry to appear
+client.debugger.attach()
+```
+
+If the backend you're attached to later disappears (the IDE closes), the next
+RPC raises `NotConnectedError` too, and the call after that looks for a
+replacement automatically — nothing to do on the caller's part.
 
 ### Anything not wrapped
 

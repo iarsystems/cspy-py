@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any
 
 from .config import Config
 from .errors import CSpyError
+from .registry_uri import format_registry_uri
 
 if TYPE_CHECKING:
     from .client import Client
@@ -207,7 +208,11 @@ class IdeServices:
         # whenever an RPC against the service fails, so a restarted backend is
         # re-checked.
         self._present: set[str] = set()
-        self._generation = client.backend.launcher_generation
+        #: The registry endpoint services were last confirmed present at. A
+        #: restarted launcher always gets a fresh port (it owns/creates its
+        #: own registry, unlike a joining CSpyServer2), so unlike debugger.py's
+        #: session tracking, the endpoint alone is a reliable "was it replaced" signal here.
+        self._endpoint: tuple[str, int] | None = None
 
     def registry_name(self, key: str) -> str:
         cfg = self._client.config
@@ -234,10 +239,10 @@ class IdeServices:
         with self._lock:
             backend = self._client.backend
             endpoint = backend.registry_endpoint()
-            if backend.launcher_generation != self._generation:
-                # The launcher was restarted: nothing it hosted is there any more.
+            if endpoint != self._endpoint:
+                # A new launcher, or a different backend entirely: nothing it hosted is there any more.
                 self._present.clear()
-                self._generation = backend.launcher_generation
+                self._endpoint = endpoint
             if not force and key in self._present:
                 return {"service": key, "registry_name": registry_name, "status": "cached"}
 
@@ -349,8 +354,7 @@ class IdeServices:
             data["registry_error"] = str(exc)
 
         endpoint = backend.current_registry_endpoint()
-        data["registry_host"] = endpoint[0] if endpoint else cfg.registry_host
-        data["registry_port"] = endpoint[1] if endpoint else cfg.registry_port
+        data["registry_uri"] = format_registry_uri(*endpoint) if endpoint else None
         data["loaded_manifests"] = dict(backend.loaded_manifests)
         launcher = backend.launcher_process.status()
         launcher["loaded_manifests"] = dict(backend.loaded_manifests)

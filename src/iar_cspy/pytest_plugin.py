@@ -46,6 +46,7 @@ from .client import Client
 from .config import Config
 from .debugger import Debugger
 from .launch import LaunchConfig
+from .registry_uri import format_registry_uri
 
 
 def pytest_addoption(parser: Any) -> None:
@@ -72,20 +73,20 @@ def config_from_options(pytestconfig: Any) -> Config:
     cspyserver2 = pytestconfig.getoption("--cspy-cspyserver2")
     registry = pytestconfig.getoption("--cspy-registry")
     if iar_path or cspyserver2:
-        overrides.update(mode="managed", registry_host=None, registry_port=None)
+        overrides.update(mode="managed", registry_uri=None)
     if iar_path:
         overrides["iar_path"] = iar_path
     if cspyserver2:
         overrides["cspy_executable"] = cspyserver2
     if registry:
         host, _, port = str(registry).rpartition(":")
-        overrides.update(mode="standalone", registry_host=host or "127.0.0.1", registry_port=int(port))
+        overrides.update(mode="standalone", registry_uri=format_registry_uri(host or "127.0.0.1", int(port)))
     return Config.from_env(**overrides)
 
 
 def backend_configured(config: Config) -> bool:
     if config.mode == "standalone":
-        return config.registry_port is not None
+        return config.registry_uri is not None
     return config.cspy_executable is not None or config.launcher_executable is not None
 
 

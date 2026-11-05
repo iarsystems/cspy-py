@@ -119,7 +119,7 @@ def test_registry_and_timeouts_from_env(monkeypatch):
         THRIFT_AUTO_EVENTHANDLER="off",
         THRIFT_INCLUDE_DIRS="/a;/b",
     )
-    assert (cfg.registry_host, cfg.registry_port, cfg.timeout_ms) == ("10.0.0.2", 51926, 1234)
+    assert (cfg.registry_uri, cfg.timeout_ms) == ("thrift://10.0.0.2:51926", 1234)
     assert cfg.cspy_args == ("-standalone", "-sockets", "-foo")
     assert cfg.auto_eventhandler is False
     assert cfg.include_dirs == ("/a", "/b", str(BUNDLED_IDL_DIR))

@@ -28,7 +28,7 @@ def install(tmp_path):
 @pytest.fixture
 def legacy(install):
     iar_path, program = install
-    client, rpc = fake_client(Config(mode="standalone", registry_port=4711, iar_path=iar_path))
+    client, rpc = fake_client(Config(mode="standalone", registry_uri="thrift://127.0.0.1:4711", iar_path=iar_path))
     rpc.on("debugger", "resolveLaunchConfiguration", unknown_method("resolveLaunchConfiguration"))
     for method in ("startSession", "loadMacroFile", "flashModule", "loadModuleWithOptions"):
         rpc.on("debugger", method)

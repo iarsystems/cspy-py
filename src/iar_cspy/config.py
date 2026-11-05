@@ -2,8 +2,8 @@
 
 Build a :class:`Config` directly (every field has a default)::
 
-    Config(iar_path="/opt/iar/ewarm")                       # managed backend
-    Config(mode="standalone", registry_port=51926)          # already running
+    Config(iar_path="/opt/iar/ewarm")                            # managed backend
+    Config(mode="standalone", registry_uri="thrift://127.0.0.1:51926")  # already running
 
 or read the ``THRIFT_*`` / ``IAR_INSTALL_PATH`` environment variables the MCP
 server documents with :meth:`Config.from_env`.
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 from ._thrift import BUNDLED_IDL_DIR
+from .registry_uri import format_registry_uri, parse_registry_uri
 
 Mode = Literal["managed", "standalone"]
 
@@ -80,15 +81,16 @@ class Config:
     mode: Mode = "managed"
     iar_path: Path | None = None
 
-    # Standalone mode: the registry of an already-running backend.
-    registry_host: str | None = None
-    registry_port: int | None = None
+    # Standalone mode: the registry of an already-running backend, as
+    # "thrift://host:port" (see registry_uri.py; format_registry_uri() builds
+    # one from parts).
+    registry_uri: str | None = None
     registry_service_name: str = "debugger"
-    # Standalone mode, when registry_port is not given: look for it through
+    # Standalone mode, when registry_uri is not given: look for it through
     # remote-control discovery files (see discovery.py) instead. Opt-in only
     # (remote_control_enabled, or giving a workspace to narrow the search),
     # since it is not safe to default to scanning the user's home directory
-    # for every standalone Config that happens to omit registry_port.
+    # for every standalone Config that happens to omit registry_uri.
     remote_control_enabled: bool = False
     remote_control_dir: Path | None = None
     remote_control_workspace: str | None = None
@@ -142,8 +144,8 @@ class Config:
         set_("service_bin_dir", _path(self.service_bin_dir))
         set_("cspy_args", tuple(self.cspy_args))
         set_("ide_services", tuple(s.strip().lower() for s in self.ide_services if s.strip()))
-        if self.registry_port is not None:
-            set_("registry_port", int(self.registry_port))
+        if self.registry_uri is not None:
+            parse_registry_uri(self.registry_uri)  # fail fast on a malformed URI
 
         include_dirs = [str(d) for d in self.include_dirs]
         thrift_parent = str(self.thrift_file.parent)
@@ -193,12 +195,15 @@ class Config:
             return tuple(part.strip() for part in raw.split(seps[0]) if part.strip())
 
         cspy_args_raw = get("THRIFT_CSPYSERVER_ARGS")
-        registry_port = get("THRIFT_REGISTRY_PORT")
+        registry_uri = get("THRIFT_REGISTRY_URI")
+        if not registry_uri:
+            registry_port = get("THRIFT_REGISTRY_PORT")
+            if registry_port:
+                registry_uri = format_registry_uri(get("THRIFT_REGISTRY_HOST", "127.0.0.1"), int(registry_port))
         values: dict[str, object] = {
             "mode": normalize_mode(get("THRIFT_CSPYSERVER_MODE")),
             "iar_path": get("IAR_INSTALL_PATH"),
-            "registry_host": get("THRIFT_REGISTRY_HOST"),
-            "registry_port": int(registry_port) if registry_port else None,
+            "registry_uri": registry_uri,
             "registry_service_name": get("THRIFT_REGISTRY_SERVICE", "debugger"),
             "remote_control_enabled": get_bool("IAR_REMOTE_CONTROL_DISCOVERY_ENABLED", False),
             "remote_control_dir": get("IAR_REMOTE_CONTROL_DISCOVERY_DIR"),

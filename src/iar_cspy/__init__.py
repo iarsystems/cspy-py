@@ -31,13 +31,23 @@ from .config import Config
 from .context import ContextManager
 from .debugger import Debugger
 from .discovery import RemoteControlInfo, discover
-from .errors import BackendError, CSpyError, CSpyExceptionInfo, SessionError, UnsupportedMethod, WaitTimeout, classify
+from .errors import (
+    BackendError,
+    CSpyError,
+    CSpyExceptionInfo,
+    NotConnectedError,
+    SessionError,
+    UnsupportedMethod,
+    WaitTimeout,
+    classify,
+)
 from .events import Events
 from .launch import LaunchConfig
 from .listwindow import ListWindow, ListWindows, TraceWindow
 from .memory import Memory
 from .options import Options, OptionsSession, ProjectNotLoaded
 from .project import Project
+from .registry_uri import format_registry_uri, parse_registry_uri
 from .source import Disassembly, SourceLookup
 from .terminal import Terminal
 from .types import (
@@ -91,6 +101,7 @@ __all__ = [
     "ListWindowRows",
     "ListWindows",
     "Memory",
+    "NotConnectedError",
     "Options",
     "OptionsSession",
     "Project",
@@ -118,6 +129,8 @@ __all__ = [
     "classify",
     "connect",
     "discover",
+    "format_registry_uri",
     "launch",
+    "parse_registry_uri",
     "to_plain",
 ]

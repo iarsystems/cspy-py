@@ -151,7 +151,7 @@ def fake_client(
     process is ever started. ``started=True`` begins with a started debug
     session, for code that expects one.
     """
-    client = Client(config or Config(mode="standalone", registry_port=4711))
+    client = Client(config or Config(mode="standalone", registry_uri="thrift://127.0.0.1:4711"))
     rpc = FakeRpc(client)
     client.call = rpc  # type: ignore[method-assign]
     client.registry = FakeRegistry(registry)  # type: ignore[assignment]

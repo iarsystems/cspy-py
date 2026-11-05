@@ -56,6 +56,7 @@ connect to its service registry instead; see
 
 ```python
 client = cspy.connect(51926)          # registry port; registry_host= for another host
+client = cspy.connect()               # or find it through remote-control discovery instead
 ```
 
 ## Requirements
@@ -223,8 +224,11 @@ notifications) and registers them there.
 - **Standalone**: connect to the registry of a backend someone else runs,
   such as a Thrift-enabled `iaride` or a hand-started
   CSpyServer2/IarServiceLauncher (`iar_cspy.connect(port)` or
-  `THRIFT_REGISTRY_PORT`). The port is that of the service registry, not of
-  the debugger service itself. Nothing is started or stopped.
+  `THRIFT_REGISTRY_URI`/`PORT`). The port is that of the service registry, not
+  of the debugger service itself. Without one, `connect()` looks for it
+  through remote-control discovery files instead (see
+  [docs/guide.md](docs/guide.md#attach-without-knowing-the-port)). Nothing is
+  started or stopped.
 
 See [docs/ide-services.md](docs/ide-services.md) for the IDE services and
 [docs/backend-notes.md](docs/backend-notes.md) for known backend behavior.

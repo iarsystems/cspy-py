@@ -57,8 +57,7 @@ def test_discover_parses_the_example_format(tmp_path):
 
     [info] = discover(directory=tmp_path)
 
-    assert info.registry_host == "127.0.0.1"
-    assert info.registry_port == 35695
+    assert info.registry_uri == "thrift://127.0.0.1:35695"
     assert info.process_id == os.getpid()
     assert info.sessionid == str(os.getpid())
     assert info.workspace == "/home/user/project/arm_main.eww"
@@ -191,7 +190,7 @@ def test_backend_does_not_discover_without_opting_in(tmp_path, listening_port, m
         tmp_path, "live", **example_fields(remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}")
     )
 
-    # A bare standalone Config (no registry_port, no remote_control_* fields)
+    # A bare standalone Config (no registry_uri, no remote_control_* fields)
     # must never scan the filesystem on its own.
     assert Backend(Config(mode="standalone")).registry_endpoint() is None
 
@@ -210,11 +209,11 @@ def test_backend_registry_endpoint_is_none_when_nothing_is_reachable(tmp_path):
     assert backend.registry_endpoint() is None
 
 
-def test_backend_explicit_registry_port_skips_discovery(tmp_path, monkeypatch):
+def test_backend_explicit_registry_uri_skips_discovery(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
-        raise AssertionError("discovery should not run when registry_port is given")
+        raise AssertionError("discovery should not run when registry_uri is given")
 
     monkeypatch.setattr(discovery, "discover", fail)
-    backend = Backend(Config(mode="standalone", registry_port=4711, remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", registry_uri="thrift://127.0.0.1:4711", remote_control_dir=tmp_path))
 
     assert backend.registry_endpoint() == ("127.0.0.1", 4711)

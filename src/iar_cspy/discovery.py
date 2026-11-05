@@ -25,7 +25,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlsplit
+
+from .registry_uri import parse_registry_uri
 
 def _default_local_running_state_folder() -> Path:
     """Mirrors the IDE's own ``WuFileHelpers::GetLocalRunningStateFolder()``."""
@@ -45,8 +46,7 @@ class RemoteControlInfo:
     """One parsed ``.remote`` file."""
 
     path: Path
-    registry_host: str
-    registry_port: int
+    registry_uri: str
     process_id: int | None = None
     sessionid: str | None = None
     workspace: str | None = None
@@ -82,13 +82,6 @@ def is_process_alive(pid: int) -> bool:
     return True
 
 
-def _parse_registry_url(url: str) -> tuple[str, int] | None:
-    parts = urlsplit(url)
-    if parts.scheme != "thrift" or not parts.hostname or not parts.port:
-        return None
-    return parts.hostname, parts.port
-
-
 def _str_or_none(raw: dict[str, Any], key: str) -> str | None:
     value = raw.get(key)
     return None if value is None else str(value)
@@ -101,8 +94,10 @@ def _load_one(path: Path) -> RemoteControlInfo | None:
         return None
     if not isinstance(raw, dict):
         return None
-    endpoint = _parse_registry_url(str(raw.get("remote_control_service_registry", "")))
-    if endpoint is None:
+    registry_uri = str(raw.get("remote_control_service_registry", ""))
+    try:
+        parse_registry_uri(registry_uri)
+    except ValueError:
         return None
     pid_raw = raw.get("process_id")
     try:
@@ -111,8 +106,7 @@ def _load_one(path: Path) -> RemoteControlInfo | None:
         pid = None
     return RemoteControlInfo(
         path=path,
-        registry_host=endpoint[0],
-        registry_port=endpoint[1],
+        registry_uri=registry_uri,
         process_id=pid,
         sessionid=_str_or_none(raw, "sessionid"),
         workspace=_str_or_none(raw, "workspace"),

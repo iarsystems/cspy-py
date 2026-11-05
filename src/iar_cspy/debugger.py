@@ -24,6 +24,7 @@ from .context import ContextLike, context_ref
 from .errors import CSpyError, SessionError, UnsupportedMethod, WaitTimeout, cspy_exception_info, describe, error_entry, with_context
 from .events import FATAL_ERROR_NOTES
 from .launch import LaunchConfig
+from .registry_uri import format_registry_uri
 from .types import CleanupResult, CoreState, Register, RegisterSnapshot, StartResult, StopResult, WaitResult
 
 if TYPE_CHECKING:
@@ -91,8 +92,9 @@ class Debugger:
         self._lock = threading.Lock()
         self._configured = False
         self._started = False
-        #: ``Backend.debugger_generation`` the session runs in.
-        self._generation = 0
+        #: (debugger_generation, current_registry_endpoint()) the session was
+        #: configured/started against - see _lost_session for why it's both.
+        self._identity: tuple[int, tuple[str, int] | None] = (0, None)
         #: The :class:`StartResult` of the last :meth:`configure_and_start`.
         self.last_start: StartResult | None = None
         #: The resolved ``shared.LaunchConfiguration`` of the configured
@@ -136,7 +138,7 @@ class Debugger:
             if started is not None:
                 self._started = bool(started)
             if configured or started:
-                self._generation = self._client.backend.debugger_generation
+                self._identity = self._session_identity()
 
     def require_started(self, what: str) -> None:
         """Raise SessionError unless this client has a started session."""
@@ -162,11 +164,25 @@ class Debugger:
             raise SessionError("attach() found no debug session: the backend reports the target offline.")
         self.set_state(configured=True, started=True)
 
+    def _session_identity(self) -> tuple[int, tuple[str, int] | None]:
+        """What the current backend "is", for noticing it was replaced.
+
+        Two parts, because neither alone is enough: ``debugger_generation``
+        catches a managed CSpyServer2 being replaced even when it rejoins the
+        same launcher-owned registry port (so the endpoint alone wouldn't
+        change); the registry endpoint catches a standalone backend being
+        replaced by a different one, e.g. a different discovered session
+        (where the generation counter never moves at all). A fixed,
+        designated registry_uri doesn't change on a restart behind it, so
+        this can't catch that case either way - an RPC failing is the
+        fallback there, same as it always was.
+        """
+        backend = self._client.backend
+        return backend.debugger_generation, backend.current_registry_endpoint()
+
     def _lost_session(self) -> str | None:
         """Why the session is gone, if it is: "replaced" or "fatal".
 
-        A managed CSpyServer2 that crashed or stopped responding is restarted
-        on the next call, and the new process has no session ("replaced").
         A fatal error the backend reported ends the session too ("fatal"), as
         in the IDE. Resets the bookkeeping when either happened.
         """
@@ -174,14 +190,14 @@ class Debugger:
             active = self._configured or self._started
             if not active:
                 return None
-            if self._generation != self._client.backend.debugger_generation:
+            if self._identity != self._session_identity():
                 reason = "replaced"
             elif self._fatal_error is not None:
                 reason = "fatal"
             else:
                 return None
         if reason == "replaced":
-            log.warning("The managed CSpyServer2 was replaced; the debug session is gone.")
+            log.warning("The backend was replaced; the debug session is gone.")
         else:
             log.warning("The backend reported a fatal error; the debug session is over: %s", self._fatal_error)
         self._reset_state()
@@ -202,8 +218,8 @@ class Debugger:
             raise self._fatal_session_error(fatal)
         diagnostics = self._client.backend.debugger_process.last_process_diagnostics
         raise SessionError(
-            "The managed CSpyServer2 process exited or stopped responding and was replaced by a "
-            "fresh one, so the debug session is gone. Start a new session."
+            "The backend was replaced (a managed CSpyServer2 was restarted, or a different "
+            "backend answers now), so the debug session is gone. Start a new session."
             + (f"\n{diagnostics}" if diagnostics else ""),
             diagnostics=diagnostics,
         )
@@ -275,8 +291,7 @@ class Debugger:
             "configured": state["configured"],
             "started": state["started"],
             "backend_mode": backend.mode,
-            "registry_host": endpoint[0] if endpoint else self._client.config.registry_host,
-            "registry_port": endpoint[1] if endpoint else self._client.config.registry_port,
+            "registry_uri": format_registry_uri(*endpoint) if endpoint else None,
             "backend_online": None,
             "core_count": None,
             "core_states": None,
