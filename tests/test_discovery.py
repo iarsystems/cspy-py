@@ -161,7 +161,7 @@ def test_backend_tries_discovered_candidates_in_turn(tmp_path, dead_port, listen
             remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}",
         ),
     )
-    backend = Backend(Config(mode="standalone", remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", auto_discovery_dir=tmp_path))
 
     # Newest first, but the newest one's registry is dead: fall through to the live one.
     assert backend.registry_endpoint() == ("127.0.0.1", listening_port)
@@ -171,7 +171,7 @@ def test_backend_discovery_result_is_cached(tmp_path, listening_port):
     write_remote_file(
         tmp_path, "live", **example_fields(remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}")
     )
-    backend = Backend(Config(mode="standalone", remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", auto_discovery_dir=tmp_path))
 
     assert backend.registry_endpoint() == ("127.0.0.1", listening_port)
 
@@ -190,22 +190,22 @@ def test_backend_does_not_discover_without_opting_in(tmp_path, listening_port, m
         tmp_path, "live", **example_fields(remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}")
     )
 
-    # A bare standalone Config (no registry_uri, no remote_control_* fields)
+    # A bare standalone Config (no registry_uri, no auto_discovery_* fields)
     # must never scan the filesystem on its own.
     assert Backend(Config(mode="standalone")).registry_endpoint() is None
 
 
-def test_backend_remote_control_enabled_opts_in(tmp_path, listening_port):
+def test_backend_auto_discovery_enabled_opts_in(tmp_path, listening_port):
     write_remote_file(
         tmp_path, "live", **example_fields(remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}")
     )
-    backend = Backend(Config(mode="standalone", remote_control_enabled=True, remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", auto_discovery_enabled=True, auto_discovery_dir=tmp_path))
 
     assert backend.registry_endpoint() == ("127.0.0.1", listening_port)
 
 
 def test_backend_registry_endpoint_is_none_when_nothing_is_reachable(tmp_path):
-    backend = Backend(Config(mode="standalone", remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", auto_discovery_dir=tmp_path))
     assert backend.registry_endpoint() is None
 
 
@@ -214,6 +214,6 @@ def test_backend_explicit_registry_uri_skips_discovery(tmp_path, monkeypatch):
         raise AssertionError("discovery should not run when registry_uri is given")
 
     monkeypatch.setattr(discovery, "discover", fail)
-    backend = Backend(Config(mode="standalone", registry_uri="thrift://127.0.0.1:4711", remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", registry_uri="thrift://127.0.0.1:4711", auto_discovery_dir=tmp_path))
 
     assert backend.registry_endpoint() == ("127.0.0.1", 4711)

@@ -16,14 +16,14 @@ getting a backend, and how it notices and recovers when one goes away.
    an IAR installation and returns their registry endpoint.
 2. **Point at** a given host:port (standalone, `Config.registry_uri`, e.g.
    `iar_cspy.connect(51926)`): the registry of a backend someone else runs.
-3. **Discover** one (standalone, opt-in, `discovery.py`): scan the `*.remote`
-   files an IAR IDE writes (default `~/.iar/remote_control`, or the Windows
-   equivalent) and use the first live one that answers. `iar_cspy.connect()`
-   defaults to this when no port/URI is given — see
+3. **Auto-discover** one (standalone, opt-in, `discovery.py`): scan the
+   `*.remote` files an IAR IDE writes (default `~/.iar/auto_discovery`, or the
+   Windows equivalent) and use the first live one that answers.
+   `iar_cspy.connect()` defaults to this when no port/URI is given — see
    [guide.md](guide.md#attach-without-knowing-the-port).
 
 `Config.mode` (`"managed"` vs `"standalone"`) plus whether `registry_uri` or
-the `remote_control_*` fields are set is what selects between them; see
+the `auto_discovery_*` fields are set is what selects between them; see
 `config.py` for the exact fields.
 
 ## Find (outer loop) and use (inner loop)

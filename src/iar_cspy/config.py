@@ -86,15 +86,16 @@ class Config:
     # one from parts).
     registry_uri: str | None = None
     registry_service_name: str = "debugger"
-    # Standalone mode, when registry_uri is not given: look for it through
-    # remote-control discovery files (see discovery.py) instead. Opt-in only
-    # (remote_control_enabled, or giving a workspace to narrow the search),
-    # since it is not safe to default to scanning the user's home directory
-    # for every standalone Config that happens to omit registry_uri.
-    remote_control_enabled: bool = False
-    remote_control_dir: Path | None = None
-    remote_control_workspace: str | None = None
-    remote_control_require_alive: bool = True
+    # Standalone mode, when registry_uri is not given: auto-discover it by
+    # reading the IDE's remote-control files (see discovery.py) instead.
+    # Opt-in only (auto_discovery_enabled, or giving a workspace to narrow
+    # the search), since it is not safe to default to scanning the user's
+    # home directory for every standalone Config that happens to omit
+    # registry_uri.
+    auto_discovery_enabled: bool = False
+    auto_discovery_dir: Path | None = None
+    auto_discovery_workspace: str | None = None
+    auto_discovery_require_alive: bool = True
     # Direct debugger endpoint, used only when there is no registry at all.
     host: str = "127.0.0.1"
     port: int = 9090
@@ -137,7 +138,7 @@ class Config:
 
         set_("mode", normalize_mode(self.mode))
         set_("iar_path", _path(self.iar_path))
-        set_("remote_control_dir", _path(self.remote_control_dir))
+        set_("auto_discovery_dir", _path(self.auto_discovery_dir))
         set_("thrift_file", _path(self.thrift_file) or BUNDLED_IDL_DIR / "cspy.thrift")
         set_("cspy_executable", _path(self.cspy_executable))
         set_("launcher_executable", _path(self.launcher_executable))
@@ -205,10 +206,10 @@ class Config:
             "iar_path": get("IAR_INSTALL_PATH"),
             "registry_uri": registry_uri,
             "registry_service_name": get("THRIFT_REGISTRY_SERVICE", "debugger"),
-            "remote_control_enabled": get_bool("IAR_REMOTE_CONTROL_DISCOVERY_ENABLED", False),
-            "remote_control_dir": get("IAR_REMOTE_CONTROL_DISCOVERY_DIR"),
-            "remote_control_workspace": get("IAR_REMOTE_CONTROL_DISCOVERY_WORKSPACE"),
-            "remote_control_require_alive": get_bool("IAR_REMOTE_CONTROL_DISCOVERY_REQUIRE_ALIVE", True),
+            "auto_discovery_enabled": get_bool("IAR_AUTO_DISCOVERY_ENABLED", False),
+            "auto_discovery_dir": get("IAR_AUTO_DISCOVERY_DIR"),
+            "auto_discovery_workspace": get("IAR_AUTO_DISCOVERY_WORKSPACE"),
+            "auto_discovery_require_alive": get_bool("IAR_AUTO_DISCOVERY_REQUIRE_ALIVE", True),
             "host": get("THRIFT_HOST", "127.0.0.1"),
             "port": get_int("THRIFT_PORT", 9090),
             "timeout_ms": get_int("THRIFT_TIMEOUT_MS", 15000),

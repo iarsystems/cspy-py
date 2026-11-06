@@ -439,12 +439,13 @@ def connect(
     ``registry_port``/``registry_host``, e.g. for a URI already in hand from
     :func:`iar_cspy.discover`.
 
-    Without a port or URI, remote-control discovery is tried by default
-    (``~/.iar/remote_control/*.remote``, or the Windows equivalent; see
-    :mod:`iar_cspy.discovery`) — usually there's exactly one IDE session to
-    find. ``workspace``, a path to an IDE workspace/project, narrows that
-    search. Pass ``remote_control_enabled=False`` to opt out and get the plain
-    direct debugger endpoint instead (``Config.host``/``Config.port``).
+    Without a port or URI, auto-discovery is tried by default - reading the
+    IDE's remote-control files (``~/.iar/auto_discovery/*.remote``, or the
+    Windows equivalent; see :mod:`iar_cspy.discovery`) — usually there's
+    exactly one IDE session to find. ``workspace``, a path to an IDE
+    workspace/project, narrows that search. Pass
+    ``auto_discovery_enabled=False`` to opt out and get the plain direct
+    debugger endpoint instead (``Config.host``/``Config.port``).
 
     Two different timeouts matter here: ``discovery_timeout`` is how long to
     wait (this call blocks, retrying) for a registry to be found and
@@ -463,9 +464,9 @@ def connect(
     elif registry_host is not None:
         raise TypeError("connect() got registry_host without registry_port")
 
-    overrides: dict[str, Any] = _given(registry_uri=registry_uri, remote_control_workspace=workspace)
-    if registry_uri is None and "remote_control_enabled" not in config and "remote_control_dir" not in config:
-        overrides.setdefault("remote_control_enabled", True)
+    overrides: dict[str, Any] = _given(registry_uri=registry_uri, auto_discovery_workspace=workspace)
+    if registry_uri is None and "auto_discovery_enabled" not in config and "auto_discovery_dir" not in config:
+        overrides.setdefault("auto_discovery_enabled", True)
 
     cfg = Config.from_env(mode="standalone", **overrides, **config)
     backend = Backend(cfg)

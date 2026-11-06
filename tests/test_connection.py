@@ -68,7 +68,7 @@ def test_registry_configured_registry_uri():
 
 
 def test_registry_configured_discovery_opted_in(tmp_path):
-    backend = Backend(Config(mode="standalone", remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", auto_discovery_dir=tmp_path))
     assert backend.registry_configured is True
 
 
@@ -109,7 +109,7 @@ def test_wait_for_registry_uri_returns_once_reachable(tmp_path):
 
 
 def test_wait_for_registry_discovery_returns_once_found(tmp_path, listening_port):
-    backend = Backend(Config(mode="standalone", remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", auto_discovery_dir=tmp_path))
 
     def add_candidate_soon():
         time.sleep(0.2)
@@ -121,7 +121,7 @@ def test_wait_for_registry_discovery_returns_once_found(tmp_path, listening_port
 
 
 def test_wait_for_registry_discovery_times_out(tmp_path):
-    backend = Backend(Config(mode="standalone", remote_control_dir=tmp_path))
+    backend = Backend(Config(mode="standalone", auto_discovery_dir=tmp_path))
     start = time.monotonic()
     with pytest.raises(NotConnectedError, match="Timed out"):
         backend.wait_for_registry(timeout_s=0.3, poll_interval_s=0.05)
@@ -158,7 +158,7 @@ def test_forget_registry_makes_the_next_lookup_look_again(tmp_path):
 
     try:
         write_remote_file(tmp_path, "live", remote_control_service_registry=f"thrift://127.0.0.1:{old_port}")
-        backend = Backend(Config(mode="standalone", remote_control_dir=tmp_path))
+        backend = Backend(Config(mode="standalone", auto_discovery_dir=tmp_path))
         assert backend.registry_endpoint() == ("127.0.0.1", old_port)
 
         # The old session closes; a new one starts and writes its own file.
@@ -181,7 +181,7 @@ def test_forget_registry_is_a_no_op_for_an_explicit_registry_uri(listening_port)
 
 def test_endpoint_forgets_the_registry_on_a_failed_resolve(tmp_path, listening_port, monkeypatch):
     write_remote_file(tmp_path, "live", remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}")
-    client = cspy.Client(Config(mode="standalone", remote_control_dir=tmp_path))
+    client = cspy.Client(Config(mode="standalone", auto_discovery_dir=tmp_path))
     assert client.backend.registry_endpoint() == ("127.0.0.1", listening_port)
 
     real_discover = discovery.discover
@@ -209,7 +209,7 @@ def test_endpoint_forgets_the_registry_on_a_failed_resolve(tmp_path, listening_p
 
 
 def test_endpoint_raises_not_connected_when_discovery_finds_nothing(tmp_path):
-    client = cspy.Client(Config(mode="standalone", remote_control_dir=tmp_path))
+    client = cspy.Client(Config(mode="standalone", auto_discovery_dir=tmp_path))
     with pytest.raises(NotConnectedError):
         client.endpoint("debugger")
 
@@ -230,7 +230,7 @@ def test_connect_tries_discovery_by_default(tmp_path, listening_port, monkeypatc
 
     client = cspy.connect()
 
-    assert client.backend.config.remote_control_enabled is True
+    assert client.backend.config.auto_discovery_enabled is True
     assert client.backend.registry_endpoint() == ("127.0.0.1", listening_port)
 
 
@@ -242,7 +242,7 @@ def test_connect_with_registry_port_skips_discovery(monkeypatch):
 
     client = cspy.connect(registry_port=4711)
 
-    assert client.backend.config.remote_control_enabled is False
+    assert client.backend.config.auto_discovery_enabled is False
     assert client.backend.registry_endpoint() == ("127.0.0.1", 4711)
 
 
@@ -254,7 +254,7 @@ def test_connect_with_registry_uri_skips_discovery(monkeypatch):
 
     client = cspy.connect(registry_uri="thrift://10.0.0.1:4711")
 
-    assert client.backend.config.remote_control_enabled is False
+    assert client.backend.config.auto_discovery_enabled is False
     assert client.backend.registry_endpoint() == ("10.0.0.1", 4711)
 
 
@@ -286,13 +286,13 @@ def test_backend_standalone_rejects_both_registry_port_and_registry_uri():
         Backend.standalone(registry_port=1, registry_uri="thrift://127.0.0.1:2")
 
 
-def test_connect_remote_control_enabled_false_opts_out(tmp_path, listening_port, monkeypatch):
+def test_connect_auto_discovery_enabled_false_opts_out(tmp_path, listening_port, monkeypatch):
     monkeypatch.setattr(discovery, "DEFAULT_REMOTE_CONTROL_DIR", tmp_path)
     write_remote_file(tmp_path, "live", remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}")
 
-    client = cspy.connect(remote_control_enabled=False)
+    client = cspy.connect(auto_discovery_enabled=False)
 
-    assert client.backend.config.remote_control_enabled is False
+    assert client.backend.config.auto_discovery_enabled is False
     assert client.backend.registry_endpoint() is None
 
 
@@ -303,11 +303,11 @@ def test_connect_discovery_timeout_blocks_until_ready(tmp_path, listening_port):
 
     threading.Thread(target=add_candidate_soon).start()
 
-    client = cspy.connect(remote_control_dir=tmp_path, discovery_timeout=5)
+    client = cspy.connect(auto_discovery_dir=tmp_path, discovery_timeout=5)
 
     assert client.backend.registry_endpoint() == ("127.0.0.1", listening_port)
 
 
 def test_connect_discovery_timeout_raises_not_connected_error(tmp_path):
     with pytest.raises(NotConnectedError):
-        cspy.connect(remote_control_dir=tmp_path, discovery_timeout=0.3)
+        cspy.connect(auto_discovery_dir=tmp_path, discovery_timeout=0.3)

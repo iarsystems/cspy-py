@@ -1,8 +1,8 @@
 """Finding a running IDE's service registry through remote-control files.
 
 An IAR IDE that hosts remote control writes one ``<pid>.remote`` JSON file per
-running instance (default directory ``~/.iar/remote_control``, or
-``%LOCALAPPDATA%\\IAR Embedded Workbench\\remote_control`` on Windows), e.g.::
+running instance (default directory ``~/.iar/auto_discovery``, or
+``%LOCALAPPDATA%\\IAR Embedded Workbench\\auto_discovery`` on Windows), e.g.::
 
     {
         "process_id" : "2545927",
@@ -16,6 +16,10 @@ running instance (default directory ``~/.iar/remote_control``, or
 :func:`discover` globs that directory and returns the matching files, newest
 first, for a caller to try connecting to in turn: a stale file can outlive its
 process, and a live process is not proof its registry still answers.
+
+This module and the file format keep the IDE's own name for the mechanism
+("remote control"); :class:`~iar_cspy.Config`'s ``auto_discovery_*`` fields
+are what opt a :class:`~iar_cspy.Backend` into using it automatically.
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ def _default_local_running_state_folder() -> Path:
 
 
 #: Where IAR IDEs write ``*.remote`` discovery files by default.
-DEFAULT_REMOTE_CONTROL_DIR = _default_local_running_state_folder() / "remote_control"
+DEFAULT_REMOTE_CONTROL_DIR = _default_local_running_state_folder() / "auto_discovery"
 
 
 @dataclass(frozen=True)

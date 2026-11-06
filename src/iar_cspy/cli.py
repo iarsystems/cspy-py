@@ -2,8 +2,8 @@
 
 Any tool built on `iar_cspy` needs to let its user pick a backend the same
 handful of ways: an IAR installation to start, or the registry of one already
-running, found by a port or by remote-control discovery. Rather than each
-tool inventing its own flags for this, `iar_cspy` ships one definition, so
+running, found by a port or by auto-discovery. Rather than each tool
+inventing its own flags for this, `iar_cspy` ships one definition, so
 `iar-cspy`-based tools default to the same CLI for it::
 
     parser = argparse.ArgumentParser()
@@ -34,9 +34,9 @@ from .registry_uri import format_registry_uri
 #: "start a managed one" (see :func:`config_from_args`).
 _STANDALONE_FLAGS = (
     "registry_uri",
-    "remote_control_enabled",
-    "remote_control_dir",
-    "remote_control_workspace",
+    "auto_discovery_enabled",
+    "auto_discovery_dir",
+    "auto_discovery_workspace",
 )
 
 
@@ -45,7 +45,7 @@ def add_connection_arguments(parser: argparse.ArgumentParser) -> None:
 
     Managed mode (start your own backend) is the default; any of
     ``--registry-uri``, ``--registry-host``/``--registry-port``,
-    ``--remote-control``, ``--remote-control-dir``, or ``--workspace``
+    ``--auto-discovery``, ``--auto-discovery-dir``, or ``--workspace``
     switches to standalone mode (connect to one you don't own) instead.
     """
     managed = parser.add_argument_group("start your own backend (managed mode, the default)")
@@ -73,29 +73,30 @@ def add_connection_arguments(parser: argparse.ArgumentParser) -> None:
     standalone.add_argument("--registry-port", type=int, help="Service registry port, with --registry-host.")
     standalone.add_argument("--registry-service", help="Registry name of the debugger service.")
     standalone.add_argument(
-        "--remote-control",
+        "--auto-discovery",
         action="store_true",
         default=None,
-        help="Find the registry through remote-control discovery files (~/.iar/remote_control by default).",
+        help="Find the registry by auto-discovery, reading the IDE's remote-control files "
+        "(~/.iar/auto_discovery by default, or the Windows equivalent).",
     )
     standalone.add_argument(
-        "--remote-control-dir", help="Directory of *.remote discovery files to scan, instead of the default."
+        "--auto-discovery-dir", help="Directory of *.remote discovery files to scan, instead of the default."
     )
     standalone.add_argument(
         "--workspace",
-        help="Narrow remote-control discovery to IDEs running this workspace/project; implies --remote-control.",
+        help="Narrow auto-discovery to IDEs running this workspace/project; implies --auto-discovery.",
     )
     require_alive = standalone.add_mutually_exclusive_group()
     require_alive.add_argument(
-        "--remote-control-require-alive",
-        dest="remote_control_require_alive",
+        "--auto-discovery-require-alive",
+        dest="auto_discovery_require_alive",
         action="store_true",
         default=None,
         help="Skip discovery files whose process is no longer running (the default).",
     )
     require_alive.add_argument(
-        "--remote-control-allow-dead",
-        dest="remote_control_require_alive",
+        "--auto-discovery-allow-dead",
+        dest="auto_discovery_require_alive",
         action="store_false",
         help="Also consider discovery files whose process is no longer running.",
     )
@@ -141,15 +142,15 @@ def config_from_args(args: argparse.Namespace, env: Mapping[str, str] | None = N
     if getattr(args, "registry_service", None):
         overrides["registry_service_name"] = args.registry_service
 
-    if getattr(args, "remote_control", None):
-        overrides["remote_control_enabled"] = True
-    if getattr(args, "remote_control_dir", None):
-        overrides["remote_control_dir"] = args.remote_control_dir
+    if getattr(args, "auto_discovery", None):
+        overrides["auto_discovery_enabled"] = True
+    if getattr(args, "auto_discovery_dir", None):
+        overrides["auto_discovery_dir"] = args.auto_discovery_dir
     if getattr(args, "workspace", None):
-        overrides["remote_control_workspace"] = args.workspace
-    require_alive = getattr(args, "remote_control_require_alive", None)
+        overrides["auto_discovery_workspace"] = args.workspace
+    require_alive = getattr(args, "auto_discovery_require_alive", None)
     if require_alive is not None:
-        overrides["remote_control_require_alive"] = require_alive
+        overrides["auto_discovery_require_alive"] = require_alive
 
     if any(overrides.get(flag) is not None for flag in _STANDALONE_FLAGS):
         overrides["mode"] = "standalone"

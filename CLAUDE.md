@@ -71,10 +71,11 @@ Everything has defaults; the IDL is bundled. The usual inputs:
 - `THRIFT_REGISTRY_URI` (or `THRIFT_REGISTRY_HOST`/`THRIFT_REGISTRY_PORT`,
   joined into one) + `THRIFT_CSPYSERVER_MODE=standalone`: connect to a running
   backend.
-- `IAR_REMOTE_CONTROL_DISCOVERY_WORKSPACE` (standalone mode, no `THRIFT_REGISTRY_URI`):
-  find the registry via remote-control discovery files instead, narrowed to
-  IDEs running that workspace. See `discovery.py`. `connect()` tries discovery
-  by default even without this (see `client.py` above).
+- `IAR_AUTO_DISCOVERY_WORKSPACE` (standalone mode, no `THRIFT_REGISTRY_URI`):
+  auto-discover the registry instead, by reading the IDE's remote-control
+  files, narrowed to IDEs running that workspace. See `discovery.py`.
+  `connect()` tries discovery by default even without this (see `client.py`
+  above).
 See `.env.example` for the rest.
 
 ## Runtime Architecture

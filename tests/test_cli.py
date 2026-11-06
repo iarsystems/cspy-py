@@ -24,7 +24,7 @@ def test_nothing_given_is_an_unchanged_config_from_env(monkeypatch):
     assert config.mode == "managed"
     assert config.iar_path is None
     assert config.registry_uri is None
-    assert config.remote_control_enabled is False
+    assert config.auto_discovery_enabled is False
 
 
 def test_iar_path(tmp_path, monkeypatch):
@@ -83,8 +83,8 @@ def test_ide_services_and_no_ide_services_are_mutually_exclusive():
         ("--registry-uri", "thrift://127.0.0.1:1"),
         ("--registry-host", "10.0.0.1", "--registry-port", "51926"),
         ("--registry-port", "51926"),
-        ("--remote-control",),
-        ("--remote-control-dir", "/tmp/whatever"),
+        ("--auto-discovery",),
+        ("--auto-discovery-dir", "/tmp/whatever"),
         ("--workspace", "/path/to/project.eww"),
     ],
 )
@@ -123,41 +123,41 @@ def test_registry_service_maps_to_registry_service_name():
     assert config.registry_service_name == "my.debugger"
 
 
-def test_workspace_maps_to_remote_control_workspace():
+def test_workspace_maps_to_auto_discovery_workspace():
     config = config_from_args(parse("--workspace", "/path/to/project.eww"))
-    assert config.remote_control_workspace == "/path/to/project.eww"
+    assert config.auto_discovery_workspace == "/path/to/project.eww"
 
 
-def test_remote_control_flag_enables_it():
-    config = config_from_args(parse("--remote-control"))
-    assert config.remote_control_enabled is True
+def test_auto_discovery_flag_enables_it():
+    config = config_from_args(parse("--auto-discovery"))
+    assert config.auto_discovery_enabled is True
 
 
-def test_remote_control_dir(tmp_path):
-    config = config_from_args(parse("--remote-control-dir", str(tmp_path)))
-    assert config.remote_control_dir == tmp_path.resolve()
+def test_auto_discovery_dir(tmp_path):
+    config = config_from_args(parse("--auto-discovery-dir", str(tmp_path)))
+    assert config.auto_discovery_dir == tmp_path.resolve()
 
 
-def test_remote_control_require_alive_defaults_to_true_when_unset():
-    config = config_from_args(parse("--remote-control"))
-    assert config.remote_control_require_alive is True
+def test_auto_discovery_require_alive_defaults_to_true_when_unset():
+    config = config_from_args(parse("--auto-discovery"))
+    assert config.auto_discovery_require_alive is True
 
 
-def test_remote_control_require_alive_flag():
-    config = config_from_args(parse("--remote-control", "--remote-control-require-alive"))
-    assert config.remote_control_require_alive is True
+def test_auto_discovery_require_alive_flag():
+    config = config_from_args(parse("--auto-discovery", "--auto-discovery-require-alive"))
+    assert config.auto_discovery_require_alive is True
 
 
-def test_remote_control_allow_dead_flag():
-    config = config_from_args(parse("--remote-control", "--remote-control-allow-dead"))
-    assert config.remote_control_require_alive is False
+def test_auto_discovery_allow_dead_flag():
+    config = config_from_args(parse("--auto-discovery", "--auto-discovery-allow-dead"))
+    assert config.auto_discovery_require_alive is False
 
 
 def test_require_alive_and_allow_dead_are_mutually_exclusive():
     parser = argparse.ArgumentParser()
     add_connection_arguments(parser)
     with pytest.raises(SystemExit):
-        parser.parse_args(["--remote-control-require-alive", "--remote-control-allow-dead"])
+        parser.parse_args(["--auto-discovery-require-alive", "--auto-discovery-allow-dead"])
 
 
 def test_parse_config_is_a_one_shot_convenience(monkeypatch):

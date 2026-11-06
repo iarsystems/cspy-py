@@ -207,9 +207,9 @@ the core state, because the IDE receives the debug events.
 
 ### Attach without knowing the port
 
-Without a port (or `registry_uri=`), `cspy.connect()` looks for the registry
-itself, through the `*.remote` discovery files a running IDE writes (default
-`~/.iar/remote_control/*.remote`, or the Windows equivalent) — usually there's
+Without a port (or `registry_uri=`), `cspy.connect()` auto-discovers the
+registry itself, by reading the `*.remote` files a running IDE writes (default
+`~/.iar/auto_discovery/*.remote`, or the Windows equivalent) — usually there's
 exactly one IDE session to find:
 
 ```python
@@ -218,7 +218,7 @@ client = cspy.connect(workspace="/path/to/project.eww")  # narrowed to IDEs runn
 client.debugger.attach()
 ```
 
-Pass `remote_control_enabled=False` to opt out and fall back to the plain
+Pass `auto_discovery_enabled=False` to opt out and fall back to the plain
 direct debugger endpoint (`host`/`port`) instead.
 
 ### Waiting for a backend that isn't up yet

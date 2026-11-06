@@ -43,17 +43,17 @@ MULTICORE_OPTION = "--multicore_nr_of_cores="
 DEBUGGER_EXIT_TIMEOUT_S = 15.0
 
 
-def remote_control_opted_in(config: Config) -> bool:
-    """Whether ``config`` asks for remote-control discovery at all.
+def auto_discovery_opted_in(config: Config) -> bool:
+    """Whether ``config`` asks for auto-discovery at all.
 
-    Opt-in only (``remote_control_enabled``, or giving a ``remote_control_workspace``/
-    ``remote_control_dir``) — a bare standalone ``Config`` never scans the
+    Opt-in only (``auto_discovery_enabled``, or giving an ``auto_discovery_workspace``/
+    ``auto_discovery_dir``) — a bare standalone ``Config`` never scans the
     filesystem on its own.
     """
     return (
-        config.remote_control_enabled
-        or config.remote_control_workspace is not None
-        or config.remote_control_dir is not None
+        config.auto_discovery_enabled
+        or config.auto_discovery_workspace is not None
+        or config.auto_discovery_dir is not None
     )
 
 
@@ -161,7 +161,7 @@ class Backend:
         endpoint (:meth:`~iar_cspy.Client.endpoint`), and to short-circuit
         :meth:`wait_for_registry` when there is nothing to wait for.
         """
-        return self.mode == "managed" or self.config.registry_uri is not None or remote_control_opted_in(self.config)
+        return self.mode == "managed" or self.config.registry_uri is not None or auto_discovery_opted_in(self.config)
 
     def registry_endpoint(self) -> tuple[str, int] | None:
         """The service registry to resolve services through: find it, fresh, every call.
@@ -171,9 +171,10 @@ class Backend:
           - a designated ``registry_uri``: used unconditionally, no reachability
             check (a real RPC against it fails clearly enough if it's down; see
             :meth:`wait_for_registry` for a version that does wait for it).
-          - remote-control discovery (see :mod:`iar_cspy.discovery`), opted
-            into via ``remote_control_enabled``/``remote_control_workspace``/
-            ``remote_control_dir`` — a bare standalone Config never scans the
+          - auto-discovery, via the IDE's remote-control files (see
+            :mod:`iar_cspy.discovery`), opted into via
+            ``auto_discovery_enabled``/``auto_discovery_workspace``/
+            ``auto_discovery_dir`` — a bare standalone Config never scans the
             filesystem on its own.
 
         None means no registry could be found at all right now. A discovered
@@ -188,7 +189,7 @@ class Backend:
         if self.mode != "managed":
             if self.config.registry_uri is not None:
                 return parse_registry_uri(self.config.registry_uri)
-            if remote_control_opted_in(self.config):
+            if auto_discovery_opted_in(self.config):
                 return self._discover_registry()
             return None
         try:
@@ -208,7 +209,7 @@ class Backend:
         """
         if not self.registry_configured:
             raise NotConnectedError(
-                "no registry configured (registry_uri, remote-control discovery) and no "
+                "no registry configured (registry_uri, auto-discovery) and no "
                 "direct debugger endpoint override"
             )
         if self.mode == "managed":
@@ -234,9 +235,9 @@ class Backend:
             return self._discovered_endpoint
         cfg = self.config
         for candidate in discovery.discover(
-            cfg.remote_control_workspace,
-            cfg.remote_control_dir,
-            require_alive=cfg.remote_control_require_alive,
+            cfg.auto_discovery_workspace,
+            cfg.auto_discovery_dir,
+            require_alive=cfg.auto_discovery_require_alive,
         ):
             endpoint = parse_registry_uri(candidate.registry_uri)
             if is_reachable(*endpoint):
