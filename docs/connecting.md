@@ -7,6 +7,7 @@ getting a backend, and how it notices and recovers when one goes away.
 - [Find (outer loop) and use (inner loop)](#find-outer-loop-and-use-inner-loop)
 - [Why a designated registry_uri isn't probed in registry_endpoint()](#why-a-designated-registry_uri-isnt-probed-in-registry_endpoint)
 - [Noticing a replaced backend](#noticing-a-replaced-backend)
+- [Inspecting the active config](#inspecting-the-active-config)
 
 ## Three ways to get a backend
 
@@ -97,3 +98,13 @@ endpoint comparison: a restarted `IarServiceLauncher` always creates a fresh
 registry rather than joining one, so a restart always does change the
 endpoint — also confirmed empirically, which is why there's no equivalent
 `launcher_generation` counter.
+
+## Inspecting the active config
+
+`Config.to_dict()` is a JSON-safe view of every field (`Path`s as strings,
+tuples as lists) - for a settings object built from env vars, a launch.json,
+or defaults layered with overrides, this is cheaper than re-deriving what was
+actually resolved. `Client.info()` pairs it with `Backend.status()` (managed
+process state, if any) in one dict: `{"config": ..., "backend": ...}`. Unlike
+`debugger.status()`/`ide_services.status()` (session and service
+diagnostics), `info()` never contacts the backend at all.

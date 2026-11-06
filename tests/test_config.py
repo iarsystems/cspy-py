@@ -135,3 +135,10 @@ def test_to_dict_is_json_safe():
     import json
 
     json.dumps(Config().to_dict())
+
+
+def test_to_dict_converts_paths_and_tuples_to_json_types():
+    cfg = Config(iar_path="/opt/iar/ewarm", include_dirs=("/a", "/b"))
+    data = cfg.to_dict()
+    assert data["iar_path"] == str(cfg.iar_path) and isinstance(data["iar_path"], str)
+    assert data["include_dirs"] == list(cfg.include_dirs) and isinstance(data["include_dirs"], list)

@@ -16,6 +16,13 @@ def client(monkeypatch):
     return client
 
 
+def test_info_is_a_structured_dump_of_config_and_backend_status(client):
+    info = client.info()
+    assert info == {"config": client.config.to_dict(), "backend": client.backend.status()}
+    assert info["config"]["registry_uri"] == "thrift://127.0.0.1:4711"
+    assert info["backend"]["mode"] == "standalone"
+
+
 def test_traced_wraps_client_side_errors_without_diagnostics(client):
     def bad_call():
         raise TypeError("Field 'ref(1)' of 'evalExpression_args' needs type 'ContextRef'")
