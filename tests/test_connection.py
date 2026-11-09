@@ -72,8 +72,13 @@ def test_registry_configured_discovery_opted_in(tmp_path):
     assert backend.registry_configured is True
 
 
+def test_registry_configured_bare_standalone_defaults_to_discovery():
+    assert Backend(Config(mode="standalone")).registry_configured is True
+
+
 def test_registry_configured_nothing_at_all():
-    assert Backend(Config(mode="standalone")).registry_configured is False
+    backend = Backend(Config(mode="standalone", auto_discovery_enabled=False))
+    assert backend.registry_configured is False
 
 
 # -- wait_for_registry() -------------------------------------------------------
@@ -215,7 +220,9 @@ def test_endpoint_raises_not_connected_when_discovery_finds_nothing(tmp_path):
 
 
 def test_endpoint_direct_debugger_fallback_only_when_nothing_configured():
-    client = cspy.Client(Config(mode="standalone", host="10.0.0.1", port=9091))
+    # Auto-discovery defaults to on, so it must be turned off explicitly too -
+    # otherwise it, not host/port, is what "configured" means here.
+    client = cspy.Client(Config(mode="standalone", host="10.0.0.1", port=9091, auto_discovery_enabled=False))
     assert client.endpoint("debugger") == ("10.0.0.1", 9091)
     with pytest.raises(NotConnectedError):
         client.endpoint("breakpoints")
@@ -242,7 +249,8 @@ def test_connect_with_registry_port_skips_discovery(monkeypatch):
 
     client = cspy.connect(registry_port=4711)
 
-    assert client.backend.config.auto_discovery_enabled is False
+    # Still True (the default); it's never consulted because registry_uri wins first.
+    assert client.backend.config.auto_discovery_enabled is True
     assert client.backend.registry_endpoint() == ("127.0.0.1", 4711)
 
 
@@ -254,7 +262,8 @@ def test_connect_with_registry_uri_skips_discovery(monkeypatch):
 
     client = cspy.connect(registry_uri="thrift://10.0.0.1:4711")
 
-    assert client.backend.config.auto_discovery_enabled is False
+    # Still True (the default); it's never consulted because registry_uri wins first.
+    assert client.backend.config.auto_discovery_enabled is True
     assert client.backend.registry_endpoint() == ("10.0.0.1", 4711)
 
 

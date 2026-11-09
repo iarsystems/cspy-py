@@ -24,7 +24,7 @@ def test_nothing_given_is_an_unchanged_config_from_env(monkeypatch):
     assert config.mode == "managed"
     assert config.iar_path is None
     assert config.registry_uri is None
-    assert config.auto_discovery_enabled is False
+    assert config.auto_discovery_enabled is True
 
 
 def test_iar_path(tmp_path, monkeypatch):

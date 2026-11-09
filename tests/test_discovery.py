@@ -180,9 +180,20 @@ def test_backend_discovery_result_is_cached(tmp_path, listening_port):
     assert backend.registry_endpoint() == ("127.0.0.1", listening_port)
 
 
-def test_backend_does_not_discover_without_opting_in(tmp_path, listening_port, monkeypatch):
+def test_backend_discovers_by_default_without_opting_in(tmp_path, listening_port, monkeypatch):
+    monkeypatch.setattr(discovery, "DEFAULT_REMOTE_CONTROL_DIR", tmp_path)
+    write_remote_file(
+        tmp_path, "live", **example_fields(remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}")
+    )
+
+    # A bare standalone Config (no registry_uri, no auto_discovery_* fields)
+    # scans the default directory on its own: auto-discovery is on by default.
+    assert Backend(Config(mode="standalone")).registry_endpoint() == ("127.0.0.1", listening_port)
+
+
+def test_backend_does_not_discover_when_disabled(tmp_path, listening_port, monkeypatch):
     def fail(*args, **kwargs):
-        raise AssertionError("discovery should not run without opting in")
+        raise AssertionError("discovery should not run once disabled")
 
     monkeypatch.setattr(discovery, "DEFAULT_REMOTE_CONTROL_DIR", tmp_path)
     monkeypatch.setattr(discovery, "discover", fail)
@@ -190,9 +201,8 @@ def test_backend_does_not_discover_without_opting_in(tmp_path, listening_port, m
         tmp_path, "live", **example_fields(remote_control_service_registry=f"thrift://127.0.0.1:{listening_port}")
     )
 
-    # A bare standalone Config (no registry_uri, no auto_discovery_* fields)
-    # must never scan the filesystem on its own.
-    assert Backend(Config(mode="standalone")).registry_endpoint() is None
+    backend = Backend(Config(mode="standalone", auto_discovery_enabled=False))
+    assert backend.registry_endpoint() is None
 
 
 def test_backend_auto_discovery_enabled_opts_in(tmp_path, listening_port):

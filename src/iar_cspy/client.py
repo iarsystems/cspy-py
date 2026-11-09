@@ -465,9 +465,6 @@ def connect(
         raise TypeError("connect() got registry_host without registry_port")
 
     overrides: dict[str, Any] = _given(registry_uri=registry_uri, auto_discovery_workspace=workspace)
-    if registry_uri is None and "auto_discovery_enabled" not in config and "auto_discovery_dir" not in config:
-        overrides.setdefault("auto_discovery_enabled", True)
-
     cfg = Config.from_env(mode="standalone", **overrides, **config)
     backend = Backend(cfg)
     if discovery_timeout is not None:

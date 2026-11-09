@@ -71,7 +71,9 @@ def test_registry_names(client):
 
 
 def test_direct_debugger_endpoint_without_registry():
-    client = Client(Config(mode="standalone", host="10.0.0.1", port=9091))
+    # Auto-discovery defaults to on, so it must be turned off explicitly too -
+    # otherwise it, not host/port, is what "configured" means here.
+    client = Client(Config(mode="standalone", host="10.0.0.1", port=9091, auto_discovery_enabled=False))
     assert client.endpoint("debugger") == ("10.0.0.1", 9091)
     with pytest.raises(CSpyError, match="registry"):
         client.endpoint("breakpoints")

@@ -46,9 +46,10 @@ DEBUGGER_EXIT_TIMEOUT_S = 15.0
 def auto_discovery_opted_in(config: Config) -> bool:
     """Whether ``config`` asks for auto-discovery at all.
 
-    Opt-in only (``auto_discovery_enabled``, or giving an ``auto_discovery_workspace``/
-    ``auto_discovery_dir``) — a bare standalone ``Config`` never scans the
-    filesystem on its own.
+    On by default (``auto_discovery_enabled`` defaults to ``True``), so a bare
+    standalone ``Config`` does scan the filesystem on its own unless that's
+    turned off explicitly, or a ``registry_uri`` is given instead (which wins
+    regardless of this).
     """
     return (
         config.auto_discovery_enabled
@@ -172,10 +173,9 @@ class Backend:
             check (a real RPC against it fails clearly enough if it's down; see
             :meth:`wait_for_registry` for a version that does wait for it).
           - auto-discovery, via the IDE's remote-control files (see
-            :mod:`iar_cspy.discovery`), opted into via
-            ``auto_discovery_enabled``/``auto_discovery_workspace``/
-            ``auto_discovery_dir`` — a bare standalone Config never scans the
-            filesystem on its own.
+            :mod:`iar_cspy.discovery`), on by default for a standalone Config
+            without a ``registry_uri``; set ``auto_discovery_enabled=False``
+            to turn it off.
 
         None means no registry could be found at all right now. A discovered
         endpoint is cached once reachable (re-scanning and re-probing on every

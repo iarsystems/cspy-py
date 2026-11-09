@@ -88,11 +88,11 @@ class Config:
     registry_service_name: str = "debugger"
     # Standalone mode, when registry_uri is not given: auto-discover it by
     # reading the IDE's remote-control files (see discovery.py) instead.
-    # Opt-in only (auto_discovery_enabled, or giving a workspace to narrow
-    # the search), since it is not safe to default to scanning the user's
-    # home directory for every standalone Config that happens to omit
-    # registry_uri.
-    auto_discovery_enabled: bool = False
+    # On by default (usually there's exactly one IDE session to find); set
+    # auto_discovery_enabled=False to opt out and fall back to the plain
+    # direct debugger endpoint (host/port) instead, or give registry_uri to
+    # skip discovery outright.
+    auto_discovery_enabled: bool = True
     auto_discovery_dir: Path | None = None
     auto_discovery_workspace: str | None = None
     auto_discovery_require_alive: bool = True
@@ -206,7 +206,7 @@ class Config:
             "iar_path": get("IAR_INSTALL_PATH"),
             "registry_uri": registry_uri,
             "registry_service_name": get("THRIFT_REGISTRY_SERVICE", "debugger"),
-            "auto_discovery_enabled": get_bool("IAR_AUTO_DISCOVERY_ENABLED", False),
+            "auto_discovery_enabled": get_bool("IAR_AUTO_DISCOVERY_ENABLED", True),
             "auto_discovery_dir": get("IAR_AUTO_DISCOVERY_DIR"),
             "auto_discovery_workspace": get("IAR_AUTO_DISCOVERY_WORKSPACE"),
             "auto_discovery_require_alive": get_bool("IAR_AUTO_DISCOVERY_REQUIRE_ALIVE", True),
