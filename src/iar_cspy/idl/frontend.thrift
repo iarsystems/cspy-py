@@ -5,6 +5,10 @@ include "shared.thrift"
 include "themes.thrift"
 
 const string FRONTEND_SERVICE = "frontend";
+const shared.ServiceVersion FRONTEND_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 
 /** Which icon to display in the message box*/
 enum MsgIcon {
@@ -82,6 +86,9 @@ struct GenericDialogResults{
  */
 service Frontend extends shared.HeartbeatService
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   /**
    * Opens a dialog box, and waits for it to be dismissed.
    * Only use this method if you actually need the result.

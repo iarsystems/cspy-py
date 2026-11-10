@@ -27,13 +27,16 @@ from .context import ContextManager
 from .debugger import Debugger
 from .errors import (
     BackendError,
+    BusyError,
     CSpyError,
+    NotConnectedError,
     UnsupportedMethod,
     classify,
     cspy_exception_info,
     describe_cspy_exception,
     error_entry,
     looks_like_backend_fault,
+    project_manager_error_info,
 )
 from .events import Events
 from .ide_services import SERVICE_MANAGER_SERVICE, IdeServices
@@ -43,6 +46,7 @@ from .memory import Memory
 from .options import Options
 from .project import Project
 from .registry import ServiceRegistry
+from .registry_uri import format_registry_uri
 from .terminal import Terminal
 
 log = logging.getLogger("iar_cspy.rpc")
@@ -155,16 +159,25 @@ class Client:
         return service
 
     def endpoint(self, service: str) -> tuple[str, int]:
-        """Resolve a service key to a (host, port) through the registry."""
-        registry = self.backend.registry_endpoint()
-        if registry is None:
-            if service == "debugger":
-                return self.config.host, self.config.port
-            raise CSpyError(
-                "A service registry (registry_port, THRIFT_REGISTRY_PORT) is required to "
-                f"resolve service {self.registry_name(service)!r}"
-            )
-        return self.registry.resolve(self.registry_name(service), registry=registry)
+        """Resolve a service key to a (host, port) through the registry.
+
+        ``backend.registry_endpoint()`` is the whole "outer loop": find one,
+        fresh, every call, however this backend is configured to - see
+        :meth:`Backend.registry_endpoint`. Nothing here needs to know which
+        way that was. A failed resolve forgets a cached discovery result, so
+        the next call looks again instead of repeating the same dead attempt.
+        """
+        endpoint = self.backend.registry_endpoint()
+        if endpoint is not None:
+            try:
+                return self.registry.resolve(self.registry_name(service), registry=endpoint)
+            except CSpyError:
+                self.backend.forget_registry()
+                raise
+        if service == "debugger" and not self.backend.registry_configured:
+            # The one legitimate direct-endpoint case: no registry at all is configured.
+            return self.config.host, self.config.port
+        raise NotConnectedError(f"No service registry available right now for service {self.registry_name(service)!r}")
 
     def call(self, service: str, method: str, *args: Any, timeout_ms: int | None = None, **kwargs: Any) -> Any:
         """Invoke ``method`` on a service, e.g. ``client.call("debugger", "go")``.
@@ -258,6 +271,10 @@ class Client:
             return UnsupportedMethod(
                 f"The backend does not implement {label}.{method} (an older IAR product): {exc}", method
             )
+        pm_info = project_manager_error_info(exc)
+        if pm_info is not None and pm_info.error_type_name == "Busy":
+            # Not a backend fault: the IDE is fine, just occupied. No diagnostics.
+            return BusyError(f"{label}.{method}: {pm_info.description}", pm_info)
         info = cspy_exception_info(exc)
         text = describe_cspy_exception(info) if info is not None else f"Thrift RPC failed: {type(exc).__name__}: {exc}"
         log.debug("error %s.%s after %.1fms: %s", label, method, elapsed_ms, _safe_repr(text))
@@ -409,17 +426,56 @@ def _given(**values: Any) -> dict[str, Any]:
     return {key: value for key, value in values.items() if value is not None}
 
 
-def connect(registry_port: int | None = None, registry_host: str | None = None, **config: Any) -> Client:
-    """Connect to an already-running backend through its service registry.
+def connect(
+    registry_port: int | None = None,
+    registry_host: str | None = None,
+    *,
+    registry_uri: str | None = None,
+    workspace: str | None = None,
+    discovery_timeout: float | None = None,
+    **config: Any,
+) -> Client:
+    """Connect to a backend you don't own, often not up yet: attach to its registry.
 
-    Arguments not given come from the environment (``THRIFT_REGISTRY_PORT``,
-    ``THRIFT_REGISTRY_HOST``, ...; see :meth:`Config.from_env`). Nothing is
-    started, and closing the client leaves the backend running.
+    Arguments not given come from the environment (``THRIFT_REGISTRY_URI``,
+    ``THRIFT_REGISTRY_PORT``/``THRIFT_REGISTRY_HOST``, ...; see
+    :meth:`Config.from_env`). Nothing is started, and closing the client
+    leaves the backend running. ``registry_uri="thrift://host:port"`` (see
+    :mod:`iar_cspy.registry_uri`) is accepted directly instead of
+    ``registry_port``/``registry_host``, e.g. for a URI already in hand from
+    :func:`iar_cspy.discover`.
+
+    Without a port or URI, auto-discovery is tried by default - reading the
+    IDE's remote-control files (``~/.iar/auto_discovery/*.remote``, or the
+    Windows equivalent; see :mod:`iar_cspy.discovery`) — usually there's
+    exactly one IDE session to find. ``workspace``, a path to an IDE
+    workspace/project, narrows that search. Pass
+    ``auto_discovery_enabled=False`` to opt out and get the plain direct
+    debugger endpoint instead (``Config.host``/``Config.port``).
+
+    Two different timeouts matter here: ``discovery_timeout`` is how long to
+    wait (this call blocks, retrying) for a registry to be found and
+    reachable *at all*; ``timeout_ms`` (a :class:`Config` field, as always) is
+    the per-RPC connection timeout once one is known. Without
+    ``discovery_timeout``, "not found yet" instead surfaces as
+    :class:`~iar_cspy.errors.NotConnectedError` on first use
+    (``Client.call``/``Client.endpoint``), same as a plain misconfiguration
+    would; with it, that error is raised here instead, once the timeout
+    elapses.
     """
-    cfg = Config.from_env(
-        mode="standalone", **_given(registry_port=registry_port, registry_host=registry_host), **config
-    )
-    return Client(Backend(cfg), owns_backend=False)
+    if registry_port is not None:
+        if registry_uri is not None:
+            raise TypeError("connect() got both registry_port and registry_uri; give one")
+        registry_uri = format_registry_uri(registry_host or "127.0.0.1", registry_port)
+    elif registry_host is not None:
+        raise TypeError("connect() got registry_host without registry_port")
+
+    overrides: dict[str, Any] = _given(registry_uri=registry_uri, auto_discovery_workspace=workspace)
+    cfg = Config.from_env(mode="standalone", **overrides, **config)
+    backend = Backend(cfg)
+    if discovery_timeout is not None:
+        backend.wait_for_registry(discovery_timeout)
+    return Client(backend, owns_backend=False)
 
 
 def launch(iar_path: str | Path | None = None, **config: Any) -> Client:
@@ -427,7 +483,10 @@ def launch(iar_path: str | Path | None = None, **config: Any) -> Client:
 
     ``iar_path`` is the directory with ``common/bin`` under it; without it,
     ``IAR_INSTALL_PATH`` is used, and other settings not given also come from
-    the environment (see :meth:`Config.from_env`). The processes start on
+    the environment (see :meth:`Config.from_env`). This is a managed
+    :class:`Backend` (the "start your own" find-strategy,
+    :meth:`Backend.launch_services`) plus the same inner use-loop
+    :func:`connect` uses once it has an endpoint: the processes start on
     first use (or call ``client.backend.start()``) and stop when the client is
     closed.
     """

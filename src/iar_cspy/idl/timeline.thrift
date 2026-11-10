@@ -5,9 +5,17 @@ include "ServiceRegistry.thrift"
 include "shared.thrift"
 
 const string TIMELINE_FRONTEND_SERVICE = "timeline.frontend";
+const shared.ServiceVersion TIMELINE_FRONTEND_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 
 // Data source access service hosted by the backend
 const string TIMELINE_BACKEND_SERVICE = "timeline.backend";
+const shared.ServiceVersion TIMELINE_BACKEND_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 
 // FRONTEND SERVICE TYPES ////////////
 
@@ -62,6 +70,9 @@ struct DbuTimelineEnablementChangedNotification
  */
 service TimelineFrontend
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   void dataAvailable(1: DbuTimelineDataAvailableNotification note, 2: string partnerNamespace);
   void channelAvailable(1: DbuTimelineChannelAvailableNotification note, 2: string partnerNamespace);
   void channelRemoved(1: DbuTimelineChannelRemovedNotification note, 2: string partnerNamespace);
@@ -80,6 +91,9 @@ struct TimelineChannelInfo {
  */
 service TimelineBackend extends shared.HeartbeatService
 {  
+    /** Get the service version hosted by the server. */
+    shared.ServiceVersion GetServiceVersion();
+
     list<TimelineChannelInfo> getChannels();
     i64 getCPUClock();
     

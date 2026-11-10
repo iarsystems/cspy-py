@@ -25,8 +25,10 @@ pip install "iar-cspy @ git+https://github.com/iarsystems/cspy-py"
 - A **backend** is the set of IAR processes hosting the services:
   CSpyServer2 for debugging, IarServiceLauncher for projects and options. A
   managed backend (`iar_cspy.launch(iar_path)`) is started and restarted for
-  you. A standalone one (`iar_cspy.connect(registry_port)`) is someone
-  else's. [Backend modes](../README.md#backend-modes) has the details.
+  you. A standalone one (`iar_cspy.connect(...)`) is someone else's, usually
+  found through remote-control discovery rather than a port you already know
+  — see [Attach without knowing the port](#attach-without-knowing-the-port)
+  below. [Backend modes](../README.md#backend-modes) has the details.
 - A **client** is your connection to it. Everything hangs off the client, and
   closing it stops a managed backend.
 - A **session** is one debug session: configure (from a launch
@@ -203,6 +205,40 @@ print(client.breakpoints.all())           # the IDE's session: do not stop it fr
 through without configuring or starting anything. Waits fall back to polling
 the core state, because the IDE receives the debug events.
 
+### Attach without knowing the port
+
+Without a port (or `registry_uri=`), `cspy.connect()` auto-discovers the
+registry itself, by reading the `*.remote` files a running IDE writes (default
+`~/.iar/auto_discovery/*.remote`, or the Windows equivalent) — usually there's
+exactly one IDE session to find:
+
+```python
+client = cspy.connect()                           # tries every live, discovered registry
+client = cspy.connect(workspace="/path/to/project.eww")  # narrowed to IDEs running it
+client.debugger.attach()
+```
+
+Pass `auto_discovery_enabled=False` to opt out and fall back to the plain
+direct debugger endpoint (`host`/`port`) instead.
+
+### Waiting for a backend that isn't up yet
+
+A discovered (or explicitly configured) registry might not be reachable yet —
+the IDE is still starting. By default that surfaces as a
+`cspy.NotConnectedError` on first use (`client.debugger.attach()`, any RPC),
+same as a plain misconfiguration would. To wait instead, pass
+`discovery_timeout` — distinct from `timeout_ms`, the per-RPC connection
+timeout once a registry *is* known:
+
+```python
+client = cspy.connect(discovery_timeout=30)   # blocks up to 30s for a live registry to appear
+client.debugger.attach()
+```
+
+If the backend you're attached to later disappears (the IDE closes), the next
+RPC raises `NotConnectedError` too, and the call after that looks for a
+replacement automatically — nothing to do on the caller's part.
+
 ### Anything not wrapped
 
 ```python
@@ -233,6 +269,20 @@ except cspy.CSpyError as exc:
 context, such as a failed configure or a rejected breakpoint location. `exc.diagnostics` has the managed processes' last
 output when the failure looks like a crash. Backend behavior worth knowing
 about is collected in [backend-notes.md](backend-notes.md).
+
+`BusyError` means ProjectManager refused a mutating call (`build()`,
+`load()`, ...) because the IDE is occupied — a modal dialog, build, or
+analysis in progress. It is always retryable; `.info.description` says why:
+
+```python
+import time
+
+try:
+    client.project.build()
+except cspy.BusyError as exc:
+    time.sleep(1)
+    client.project.build()
+```
 
 ## Tests
 

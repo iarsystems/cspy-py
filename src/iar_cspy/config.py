@@ -2,8 +2,8 @@
 
 Build a :class:`Config` directly (every field has a default)::
 
-    Config(iar_path="/opt/iar/ewarm")                       # managed backend
-    Config(mode="standalone", registry_port=51926)          # already running
+    Config(iar_path="/opt/iar/ewarm")                            # managed backend
+    Config(mode="standalone", registry_uri="thrift://127.0.0.1:51926")  # already running
 
 or read the ``THRIFT_*`` / ``IAR_INSTALL_PATH`` environment variables the MCP
 server documents with :meth:`Config.from_env`.
@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 from ._thrift import BUNDLED_IDL_DIR
+from .registry_uri import format_registry_uri, parse_registry_uri
 
 Mode = Literal["managed", "standalone"]
 
@@ -80,10 +81,21 @@ class Config:
     mode: Mode = "managed"
     iar_path: Path | None = None
 
-    # Standalone mode: the registry of an already-running backend.
-    registry_host: str | None = None
-    registry_port: int | None = None
+    # Standalone mode: the registry of an already-running backend, as
+    # "thrift://host:port" (see registry_uri.py; format_registry_uri() builds
+    # one from parts).
+    registry_uri: str | None = None
     registry_service_name: str = "debugger"
+    # Standalone mode, when registry_uri is not given: auto-discover it by
+    # reading the IDE's remote-control files (see discovery.py) instead.
+    # On by default (usually there's exactly one IDE session to find); set
+    # auto_discovery_enabled=False to opt out and fall back to the plain
+    # direct debugger endpoint (host/port) instead, or give registry_uri to
+    # skip discovery outright.
+    auto_discovery_enabled: bool = True
+    auto_discovery_dir: Path | None = None
+    auto_discovery_workspace: str | None = None
+    auto_discovery_require_alive: bool = True
     # Direct debugger endpoint, used only when there is no registry at all.
     host: str = "127.0.0.1"
     port: int = 9090
@@ -126,14 +138,15 @@ class Config:
 
         set_("mode", normalize_mode(self.mode))
         set_("iar_path", _path(self.iar_path))
+        set_("auto_discovery_dir", _path(self.auto_discovery_dir))
         set_("thrift_file", _path(self.thrift_file) or BUNDLED_IDL_DIR / "cspy.thrift")
         set_("cspy_executable", _path(self.cspy_executable))
         set_("launcher_executable", _path(self.launcher_executable))
         set_("service_bin_dir", _path(self.service_bin_dir))
         set_("cspy_args", tuple(self.cspy_args))
         set_("ide_services", tuple(s.strip().lower() for s in self.ide_services if s.strip()))
-        if self.registry_port is not None:
-            set_("registry_port", int(self.registry_port))
+        if self.registry_uri is not None:
+            parse_registry_uri(self.registry_uri)  # fail fast on a malformed URI
 
         include_dirs = [str(d) for d in self.include_dirs]
         thrift_parent = str(self.thrift_file.parent)
@@ -183,13 +196,20 @@ class Config:
             return tuple(part.strip() for part in raw.split(seps[0]) if part.strip())
 
         cspy_args_raw = get("THRIFT_CSPYSERVER_ARGS")
-        registry_port = get("THRIFT_REGISTRY_PORT")
+        registry_uri = get("THRIFT_REGISTRY_URI")
+        if not registry_uri:
+            registry_port = get("THRIFT_REGISTRY_PORT")
+            if registry_port:
+                registry_uri = format_registry_uri(get("THRIFT_REGISTRY_HOST", "127.0.0.1"), int(registry_port))
         values: dict[str, object] = {
             "mode": normalize_mode(get("THRIFT_CSPYSERVER_MODE")),
             "iar_path": get("IAR_INSTALL_PATH"),
-            "registry_host": get("THRIFT_REGISTRY_HOST"),
-            "registry_port": int(registry_port) if registry_port else None,
+            "registry_uri": registry_uri,
             "registry_service_name": get("THRIFT_REGISTRY_SERVICE", "debugger"),
+            "auto_discovery_enabled": get_bool("IAR_AUTO_DISCOVERY_ENABLED", True),
+            "auto_discovery_dir": get("IAR_AUTO_DISCOVERY_DIR"),
+            "auto_discovery_workspace": get("IAR_AUTO_DISCOVERY_WORKSPACE"),
+            "auto_discovery_require_alive": get_bool("IAR_AUTO_DISCOVERY_REQUIRE_ALIVE", True),
             "host": get("THRIFT_HOST", "127.0.0.1"),
             "port": get_int("THRIFT_PORT", 9090),
             "timeout_ms": get_int("THRIFT_TIMEOUT_MS", 15000),

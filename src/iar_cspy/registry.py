@@ -19,7 +19,7 @@ class ServiceRegistry:
     def _endpoint(self, registry: tuple[str, int] | None = None) -> tuple[str, int]:
         endpoint = registry or self._client.backend.registry_endpoint()
         if endpoint is None:
-            raise CSpyError("A service registry (registry_port, THRIFT_REGISTRY_PORT) is required to query services")
+            raise CSpyError("A service registry (registry_uri, THRIFT_REGISTRY_URI) is required to query services")
         return endpoint
 
     def _call(self, method: str, *args: Any, registry: tuple[str, int] | None = None) -> Any:

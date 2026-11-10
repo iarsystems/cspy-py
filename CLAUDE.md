@@ -16,9 +16,12 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 `src/iar_cspy/`:
 - `client.py`: `Client`, the root object. `Client.call(service, method, ...)`
   is the single RPC choke point (registry resolution, argument coercion,
-  error conversion, tracing). Also `launch()`/`connect()`.
+  error conversion, tracing). Also `launch()`/`connect()` — see
+  [docs/connecting.md](docs/connecting.md) for how these find and keep a
+  registry.
 - `backend.py`: `Backend`, owning the managed processes (IarServiceLauncher
   plus CSpyServer2 joining its registry) or pointing at a standalone registry.
+  See [docs/connecting.md](docs/connecting.md).
 - `_process.py`: supervisor for one backend process (log capture, registry
   banner, restart, diagnostics).
 - `config.py`: `Config` dataclass; `Config.from_env()` reads the `THRIFT_*`
@@ -39,10 +42,22 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 - `_session.py`: `requires_session`, the package's session guard.
 - `_legacy_launch.py`: session configuration and launch sequence for
   products without `resolveLaunchConfiguration`.
+- `discovery.py`: `discover()`/`RemoteControlInfo` — find a running IDE's
+  service registry through the `*.remote` files it writes. See
+  [docs/connecting.md](docs/connecting.md).
+- `registry_uri.py`: `format_registry_uri(host, port)`/`parse_registry_uri(uri)`
+  — the `thrift://host:port` string `Config.registry_uri` and
+  `RemoteControlInfo.registry_uri` both use, instead of separate host/port
+  fields.
+- `cli.py`: `add_connection_arguments()`/`config_from_args()`/`parse_config()`
+  — the standard `argparse` CLI for `Config` (public, for any tool built on
+  `iar_cspy`, not just this package's own scripts/pytest plugin — those still
+  have their own older, narrower `--cspy-*`/`--iar-path` flags, not yet
+  switched over to this).
 
 Also: `examples/firmware/` is the simulator program + launch.json
-used by the live tests and demos. `docs/` holds the usage guide, IDE services
-and backend notes.
+used by the live tests and demos. `docs/` holds the usage guide, connecting,
+IDE services and backend notes.
 
 ## Dependency and Compatibility Notes
 - `thriftpy2` loads the bundled IDL at runtime; it is the only dependency.
@@ -53,25 +68,32 @@ and backend notes.
 ## Environment Contract
 Everything has defaults; the IDL is bundled. The usual inputs:
 - `IAR_INSTALL_PATH` / `--iar-path`: IAR installation (managed mode, default).
-- `THRIFT_REGISTRY_HOST` / `THRIFT_REGISTRY_PORT` (+ `THRIFT_CSPYSERVER_MODE=standalone`):
-  connect to a running backend.
+- `THRIFT_REGISTRY_URI` (or `THRIFT_REGISTRY_HOST`/`THRIFT_REGISTRY_PORT`,
+  joined into one) + `THRIFT_CSPYSERVER_MODE=standalone`: connect to a running
+  backend.
+- `IAR_AUTO_DISCOVERY_WORKSPACE` (standalone mode, no `THRIFT_REGISTRY_URI`):
+  auto-discover the registry instead, by reading the IDE's remote-control
+  files, narrowed to IDEs running that workspace. See `discovery.py`.
+  `connect()` tries discovery by default even without this (see `client.py`
+  above).
 See `.env.example` for the rest.
 
 ## Runtime Architecture
-1. A call (from a script, a test, or an MCP tool) reaches `Client.call`.
-2. `Backend.registry_endpoint()` ensures the managed processes are up and returns the registry.
-3. The service is resolved through the registry, and the RPC is made on a
-   fresh connection.
-4. Failures become `CSpyError`/`BackendError`, with backend diagnostics
-   attached when they look like crashes.
+
+How a call gets from `Client.call` to an RPC, the three ways `Backend` finds
+a registry (start your own / point at host:port / discover), the find/use
+loop, and how a replaced backend is noticed: see
+[docs/connecting.md](docs/connecting.md) — read it rather than this file for
+any of that, `backend.py`/`client.py`/`discovery.py` are the implementation.
 
 Important behavior:
 - The registry endpoint is not the debugger endpoint itself.
 - The event handler and libsupport services are hosted by this process and
   registered on configure/start.
 - One session per CSpyServer2 process: on stop, managed mode has it exit
-  (`Debugger.exit()`, not the deprecated `stopSession`) and starts a fresh one. A
-  replaced CSpyServer2 (`Backend.debugger_generation`) ends the session:
+  (`Debugger.exit()`, not the deprecated `stopSession`) and starts a fresh
+  one. A replaced backend ends the session (`Debugger._session_identity()`,
+  see [docs/connecting.md](docs/connecting.md#noticing-a-replaced-backend));
   `Client.call` raises `SessionError` for calls that needed it, as it does
   after the backend posts `kDkFatalError`.
 - Session-dependent methods raise `SessionError` without a started

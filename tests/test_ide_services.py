@@ -194,7 +194,11 @@ def ide(fake_stage):
     """A fake client whose backend can host IDE services, and the manifests it loaded."""
     bin_dir = fake_stage(libraries=("ProjectManagerHandler", "OptionsService"), manifests=("projectmanager.json",))
     client, rpc = fake_client(
-        Config(mode="standalone", registry_port=4711, launcher_executable=bin_dir / "IarServiceLauncher")
+        Config(
+            mode="standalone",
+            registry_uri="thrift://127.0.0.1:4711",
+            launcher_executable=bin_dir / "IarServiceLauncher",
+        )
     )
     rpc.on("servicemanager", "startServicesFromJsonManifest", None)
     return client, rpc, bin_dir
@@ -222,11 +226,12 @@ def test_ensure_caches_presence(ide):
     assert client.ide_services.ensure("projectmanager", force=True)["status"] == "already-registered"
 
 
-def test_ensure_cache_is_dropped_when_the_launcher_restarts(ide):
+def test_ensure_cache_is_dropped_when_the_launcher_restarts(ide, monkeypatch):
     client, _, _ = ide
     client.registry.set(["com.iar.thrift.service.projectmanager"])
     assert client.ide_services.ensure("projectmanager")["status"] == "already-registered"
-    client.backend.launcher_generation += 1
+    # Simulate the launcher having been replaced: the registry endpoint changed.
+    monkeypatch.setattr(client.backend, "registry_endpoint", lambda: ("127.0.0.1", 4712))
     assert client.ide_services.ensure("projectmanager")["status"] == "already-registered"
 
 
@@ -284,7 +289,8 @@ def test_ensure_without_registry_explains_options():
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_auto_ensure_respects_opt_out(monkeypatch, enabled):
-    client, _ = fake_client(Config(mode="standalone", registry_port=4711, auto_ide_services=enabled))
+    config = Config(mode="standalone", registry_uri="thrift://127.0.0.1:4711", auto_ide_services=enabled)
+    client, _ = fake_client(config)
     called: list[str] = []
     monkeypatch.setattr(client.ide_services, "ensure", lambda key, **kw: called.append(key))
     client.ide_services.auto_ensure("options")
@@ -306,7 +312,7 @@ def test_status_reports_registry_and_services(ide):
 
     status = client.ide_services.status()
     assert status["cspy_mode"] == "standalone"
-    assert status["registry_port"] == 4711
+    assert status["registry_uri"] == "thrift://127.0.0.1:4711"
     assert status["has_service_manager"] is True
     assert status["services"]["projectmanager"]["registered"] is True
     assert status["services"]["options"]["registered"] is False

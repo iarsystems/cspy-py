@@ -11,8 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from iar_cspy import AccessType, Context, CSpyError, LaunchConfig, ProjectNotLoaded
+from iar_cspy import AccessType, BusyError, Context, CSpyError, LaunchConfig, ProjectNotLoaded
 from iar_cspy.context import context_ref
+from iar_cspy.testing import project_manager_error
 
 
 # -- breakpoints --------------------------------------------------------------
@@ -399,6 +400,15 @@ def test_project_start_debugging_stops_after_a_failed_build(fake):
     assert result.build.succeeded is False
     assert result.configured is False
     assert rpc.methods() == ["BuildProject"]
+
+
+def test_project_build_busy_is_retryable(fake):
+    client, rpc = fake
+    rpc.on("projectmanager", "BuildProject", project_manager_error(description="a build is already running"))
+    with pytest.raises(BusyError, match="a build is already running") as exc_info:
+        client.project.build("/w/p.ewp", "Debug")
+    assert client.classify_error(exc_info.value)["code"] == "PROJECTMANAGER_BUSY"
+    assert client.classify_error(exc_info.value)["retryable"] is True
 
 
 # -- options ------------------------------------------------------------------

@@ -56,6 +56,7 @@ connect to its service registry instead; see
 
 ```python
 client = cspy.connect(51926)          # registry port; registry_host= for another host
+client = cspy.connect()               # or auto-discover it instead
 ```
 
 ## Requirements
@@ -103,6 +104,7 @@ we recommend using the latest IAR product version for your architecture, if poss
 | `client.ide_services` | Hosting ProjectManager/OptionsService: `status`, `ensure`. |
 | `client.raw("debugger")` | Any RPC the typed layer does not wrap: `client.raw("debugger").getAllZones()`. |
 | `client.capabilities()` | What the backend offers right now, without raising. |
+| `iar_cspy.cli` | `add_connection_arguments(parser)`/`config_from_args(args)` — the standard CLI flags for `Config`, for any tool built on this package. `parse_config()` for a tool with no flags of its own. |
 
 Backend data comes back as the IDL's thriftpy2 struct objects, with attribute
 access (`bp.id`, `frame.functionName`, `value.type`); `cspy.to_plain(x)`
@@ -129,8 +131,12 @@ when the target did not stop at `stopOnSymbol`. When another frontend owns the
 session (an IDE you connected to), `client.debugger.attach()` adopts it. For
 failures that look like a
 backend crash or reset, `.diagnostics` carries the managed processes' recent
-output. `client.classify_error(exc)` maps any exception onto a stable code
-(`TRANSPORT_CONNECTION_RESET`, `TIMEOUT`, `CSPY_KDCERROR`, ...) with a
+output. `BusyError` means ProjectManager refused a mutating call because the
+IDE is occupied (a modal dialog, build, or analysis in progress; `.info` has
+the decoded `errorType`/`description`) — it is retryable: back off and retry.
+`client.classify_error(exc)` maps any exception onto a stable code
+(`TRANSPORT_CONNECTION_RESET`, `TIMEOUT`, `CSPY_KDCERROR`,
+`PROJECTMANAGER_BUSY`, ...) with a
 `retryable` flag. The waits (`go_and_wait`, `run_to`, the steps,
 `wait_for_state`) raise `WaitTimeout`, or return a result with
 `timed_out=True` when given `check=False`.
@@ -223,8 +229,11 @@ notifications) and registers them there.
 - **Standalone**: connect to the registry of a backend someone else runs,
   such as a Thrift-enabled `iaride` or a hand-started
   CSpyServer2/IarServiceLauncher (`iar_cspy.connect(port)` or
-  `THRIFT_REGISTRY_PORT`). The port is that of the service registry, not of
-  the debugger service itself. Nothing is started or stopped.
+  `THRIFT_REGISTRY_URI`/`PORT`). The port is that of the service registry, not
+  of the debugger service itself. Without one, `connect()` auto-discovers it
+  instead, by reading the IDE's remote-control files (see
+  [docs/guide.md](docs/guide.md#attach-without-knowing-the-port)). Nothing is
+  started or stopped.
 
 See [docs/ide-services.md](docs/ide-services.md) for the IDE services and
 [docs/backend-notes.md](docs/backend-notes.md) for known backend behavior.

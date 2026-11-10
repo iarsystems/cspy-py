@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from iar_cspy import CSpyError, SessionError
-from iar_cspy.errors import DC_RESULTS, classify, cspy_exception_info, describe, looks_like_backend_fault
-from iar_cspy.testing import cspy_exception
+from iar_cspy import BusyError, CSpyError, SessionError
+from iar_cspy.errors import (
+    DC_RESULTS,
+    classify,
+    cspy_exception_info,
+    describe,
+    looks_like_backend_fault,
+    project_manager_error_info,
+)
+from iar_cspy.testing import cspy_exception, project_manager_error
 
 
 def test_backend_fault_detection_ignores_client_side_shape_errors():
@@ -16,6 +23,24 @@ def test_cspy_exception_decoded_from_object_and_text():
     assert (info.code, info.method, info.culprit) == (8, "DkLoadModule", "test.out")
     assert cspy_exception_info(CSpyError(str(exc))) == info
     assert "hint=License violation" in describe(exc)
+
+
+def test_project_manager_error_info_decodes_errortype_name():
+    exc = project_manager_error(description="a build is in progress")
+    info = project_manager_error_info(exc)
+    assert (info.error_type, info.error_type_name, info.description) == (3, "Busy", "a build is in progress")
+
+    generic = project_manager_error_info(project_manager_error(error_type="Generic", description="oops"))
+    assert (generic.error_type, generic.error_type_name) == (0, "Generic")
+
+    assert project_manager_error_info(ValueError("not a ProjectManagerError")) is None
+
+
+def test_classify_busy_error_is_retryable():
+    exc = BusyError("projectmanager.BuildProject: busy", project_manager_error_info(project_manager_error()))
+    out = classify(exc)
+    assert (out["code"], out["category"], out["retryable"]) == ("PROJECTMANAGER_BUSY", "projectmanager", True)
+    assert out["details"]["projectmanager"]["error_type_name"] == "Busy"
 
 
 def test_classify_license_violation():

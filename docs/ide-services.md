@@ -151,7 +151,7 @@ and which manifest would be used for each missing service:
   "cspy_mode": "managed",
   "iar_path": "/path/to/install",
   "service_bin_dir": "/path/to/install/common/bin",
-  "registry_port": 37523,
+  "registry_uri": "thrift://127.0.0.1:37523",
   "has_service_manager": true,
   "services": {
     "projectmanager": { "registry_name": "com.iar.thrift.service.projectmanager",

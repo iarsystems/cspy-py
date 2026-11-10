@@ -282,4 +282,14 @@ struct LaunchConfiguration {
   16: bool leaveTargetRunning,
   17: string stopOnSymbol,
   18: DownloadConfiguration download,
+  // Whether the configuration's toolchain has a "Runtime Checking" tool at
+  // all, i.e. whether C-RUN is available for this target - independent of
+  // whether its "Enable" option is currently checked.
+  19: bool crunSupported,
 }
+
+struct ServiceVersion {
+  1: i32 major,
+  2: i32 minor,
+}
+

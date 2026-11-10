@@ -30,13 +30,26 @@ from .client import Client, connect, launch
 from .config import Config
 from .context import ContextManager
 from .debugger import Debugger
-from .errors import BackendError, CSpyError, CSpyExceptionInfo, SessionError, UnsupportedMethod, WaitTimeout, classify
+from .discovery import RemoteControlInfo, discover
+from .errors import (
+    BackendError,
+    BusyError,
+    CSpyError,
+    CSpyExceptionInfo,
+    NotConnectedError,
+    ProjectManagerErrorInfo,
+    SessionError,
+    UnsupportedMethod,
+    WaitTimeout,
+    classify,
+)
 from .events import Events
 from .launch import LaunchConfig
 from .listwindow import ListWindow, ListWindows, TraceWindow
 from .memory import Memory
 from .options import Options, OptionsSession, ProjectNotLoaded
 from .project import Project
+from .registry_uri import format_registry_uri, parse_registry_uri
 from .source import Disassembly, SourceLookup
 from .terminal import Terminal
 from .types import (
@@ -71,6 +84,7 @@ __all__ = [
     "BackendError",
     "Breakpoints",
     "BuildResult",
+    "BusyError",
     "CSpyError",
     "CSpyExceptionInfo",
     "CleanupResult",
@@ -90,15 +104,18 @@ __all__ = [
     "ListWindowRows",
     "ListWindows",
     "Memory",
+    "NotConnectedError",
     "Options",
     "OptionsSession",
     "Project",
     "ProjectDebugResult",
     "ProjectInfo",
+    "ProjectManagerErrorInfo",
     "ProjectNotLoaded",
     "ProjectStatus",
     "Register",
     "RegisterSnapshot",
+    "RemoteControlInfo",
     "SessionError",
     "SourceLocation",
     "SourceLookup",
@@ -115,6 +132,9 @@ __all__ = [
     "WaitTimeout",
     "classify",
     "connect",
+    "discover",
+    "format_registry_uri",
     "launch",
+    "parse_registry_uri",
     "to_plain",
 ]

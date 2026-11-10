@@ -95,5 +95,5 @@ def test_registration_needs_a_registry():
     client, _ = fake_client(Config(mode="standalone"))
     assert client.events.ensure_registered() == {"ok": False, "reason": "no-registry-port"}
     assert client.terminal.ensure_registered() == {"ok": False, "reason": "no-registry-port"}
-    disabled, _ = fake_client(Config(mode="standalone", registry_port=1, auto_eventhandler=False))
+    disabled, _ = fake_client(Config(mode="standalone", registry_uri="thrift://127.0.0.1:1", auto_eventhandler=False))
     assert disabled.events.ensure_registered()["reason"] == "auto-eventhandler-disabled"

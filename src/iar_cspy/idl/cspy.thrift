@@ -7,10 +7,22 @@ include "shared.thrift"
 
 /** The unique identifier for the Debugger service */
 const string DEBUGGER_SERVICE = "debugger";
+const shared.ServiceVersion DEBUGGER_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 /** The unique identifier for the Debugger Event Handler service */
 const string DEBUGEVENT_SERVICE = "debugger.eventhandler";
+const shared.ServiceVersion DEBUGEVENT_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 /** The unique identifier for the Context Manager service */
 const string CONTEXT_MANAGER_SERVICE = "debugger.contextmanager";
+const shared.ServiceVersion CONTEXT_MANAGER_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 /** The unique identifier for the Memory service */
 const string MEMORY_SERVICE = "debugger.memory";
 
@@ -28,7 +40,7 @@ struct SessionConfiguration
   2: string driverName,
   3: string processorName,
   4: list<string> options,
-  //5: list<string> extraOptions, // Removed from 1.1.7, only options are supported. See Jira IDE-4125 
+  //5: list<string> extraOptions, // Removed, only 'options' are supported. See Jira IDE-4125 
   //6: bool usingExtraOptions,
   //7: list<string> internalOptions,
   8: string executable,
@@ -49,7 +61,7 @@ struct SessionConfiguration
   /** True if we should attach to a running target */
   19: bool attachToTarget;
   
-  /** True if we leave the target running on debug session end (from 1.1.11) */
+  /** True if we leave the target running on debug session end */
   20: bool leaveRunning;    
 }
 
@@ -211,6 +223,9 @@ struct LogEvent
  */
 service DebugEventListener
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   /**
    * Called whenever a debug event happens. See DkNotifySubscriber#Notify.
    */
@@ -385,6 +400,9 @@ struct DebugSettings
  */
 service Debugger extends shared.HeartbeatService
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   /** Returns the version of the debugger as a string. */
   string getVersionString();
   
@@ -634,6 +652,9 @@ service Debugger extends shared.HeartbeatService
  */
 service ContextManager extends shared.HeartbeatService
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   /** Set the current inspection context. This is invoked for example when
      the user selects a stack frame in the Eclipse debug view.
     */

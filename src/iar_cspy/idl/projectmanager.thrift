@@ -5,6 +5,11 @@ include "shared.thrift"
 
 // Service identifier
 const string PROJECTMANAGER_ID = "com.iar.thrift.service.projectmanager";
+// Service version
+const shared.ServiceVersion PROJECTMANAGER_VERSION = {
+    "major": 1, // Increment for breaking changes
+    "minor": 1  // Increment for non-breaking changes
+};
 
 enum ProjectManagerErrorType {
     //! A generic error
@@ -13,6 +18,9 @@ enum ProjectManagerErrorType {
     LaunchConfigurationInvalid
     //! Loading a launch configuration is not applicable in this context
     LaunchConfigurationNotApplicable
+    //! The IDE cannot service the call right now (a modal dialog is open, or
+    //! a build or analysis is in progress). Retryable: back off and retry.
+    Busy
 }
 
 exception ProjectManagerError {
@@ -473,6 +481,9 @@ struct DebugLauncherInfo{
  */
 service ProjectManager extends shared.HeartbeatService
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   /** Create new, empty workspace with the provided file path. */
   /** Creating a workspace will automatically close any open workspace. */
   /** The empty workspace file is saved. Any missing directory in the path */
@@ -599,6 +610,11 @@ service ProjectManager extends shared.HeartbeatService
   /** Remove a Configuration from a project given its name*/
   /** Does not save the project. */
   void RemoveConfigurationNoSave(1: ProjectContext project, 2: string configurationName);
+
+  /** Rename a Configuration in a project. Does not save the project. */
+  /** Returns false if the configuration does not exist, is locked, or if */
+  /** the new name is empty or already used by another configuration. */
+  bool RenameConfigurationNoSave(1: ProjectContext project, 2: string oldName, 3: string newName);
 
   /** Get all Configurations in a project */
   list<Configuration> GetConfigurations(1: ProjectContext project);
@@ -794,6 +810,9 @@ service ProjectManager extends shared.HeartbeatService
   /** Get a list of option categories for a given configuration */
   list<OptionCategory> GetOptionCategories(1: ProjectContext prj, 2: string configurationName)
 
+  /** Like GetOptionCategories, but leaves out the tool categories that do not apply to the given node (file, group). For example, a text file only has the custom build category. */
+  list<OptionCategory> GetOptionCategoriesForNode(1: ProjectContext prj, 2: string configurationName, 3: Node node)
+
   /** Compares several lists of options, by:
     * - computing a set containing all the options ids in each list
     * - comparing the string value of options that have the same id. If an option is missing from an input list, it is considered as having an empty value in that list.
@@ -840,10 +859,8 @@ service ProjectManager extends shared.HeartbeatService
 
   /**
   * Gets a JSON representaion of the option presentation
-  *
-  * Supported locales: en_GB
   */
-  string GetPresentationForOptionsAsJson(1:string locale) throws (1:ProjectManagerError e);
+  string GetPresentationForOptionsAsJson(1:string toolchainId) throws (1:ProjectManagerError e);
 
 
   /** Update all project connections listed for the given project. */
@@ -1001,4 +1018,7 @@ service ProjectManager extends shared.HeartbeatService
 
  //! Export a CStat Configuration for the project:
  void ExportCStatConfiguration(1: ProjectContext prj, 2: string configurationName, 3: string filename) throws (1:ProjectManagerError e);
+
+ //! Collect information about the current installation.
+ shared.PropertyTreeItem GetVersionInfo() throws (1:ProjectManagerError e);
 }

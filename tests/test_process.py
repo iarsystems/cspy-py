@@ -130,16 +130,17 @@ def test_cspyserver2_joins_the_launcher_registry(tmp_path, monkeypatch):
         assert backend.debugger_process.last_cmd[-2:] == ["-registry", str(port)]
         assert backend.launcher_process.registry_port == port
         assert pruned == [port]  # before CSpyServer2 joined
-        assert (backend.launcher_generation, backend.debugger_generation) == (1, 1)
+        assert backend.debugger_generation == 1
 
         # Nothing to do while both are healthy.
         assert backend.registry_endpoint() == (host, port)
-        assert (backend.launcher_generation, backend.debugger_generation) == (1, 1)
+        assert backend.debugger_generation == 1
 
-        # A replaced CSpyServer2 counts as a new generation; the launcher stays.
+        # A replaced CSpyServer2 counts as a new generation (it rejoins the same
+        # launcher-owned port, so the endpoint alone wouldn't show this).
         backend.stop_debugger()
-        backend.registry_endpoint()
-        assert (backend.launcher_generation, backend.debugger_generation) == (1, 2)
+        assert backend.registry_endpoint() == (host, port)
+        assert backend.debugger_generation == 2
     finally:
         backend.shutdown()
     assert not backend.debugger_process.running and not backend.launcher_process.running
@@ -232,7 +233,7 @@ def test_cspy_args_carry_the_core_count():
     given = Backend(Config(mode="managed", cspy_args=("-standalone", "--multicore_nr_of_cores=2")))
     given.use_core_count(3)
     assert given.cspy_args(None) == ["-standalone", "--multicore_nr_of_cores=2"]  # the user's own choice
-    assert Backend(Config(mode="standalone", registry_port=1)).use_core_count(2) is False
+    assert Backend(Config(mode="standalone", registry_uri="thrift://127.0.0.1:1")).use_core_count(2) is False
 
 
 def test_prune_stale_registrations_removes_unreachable_endpoints(tmp_path, monkeypatch):

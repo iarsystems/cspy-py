@@ -2,8 +2,13 @@ namespace java com.iar.services.registry
 namespace cpp ServiceManager.Thrift
 
 include "ServiceRegistry.thrift"
+include "shared.thrift"
 
 const string SERVICE_MANAGER_SERVICE = "com.iar.thrift.service.manager";
+const shared.ServiceVersion SERVICE_MANAGER_VERSION = {
+    "major": 1, // Increment for breaking changes
+    "minor": 0  // Increment for non-breaking changes
+};
 
 struct ServiceConfig
 {
@@ -22,6 +27,9 @@ struct ServiceConfig
  via ServiceConfig instances and/or externally (e.g. service manifest files).
  */
 service CSpyServiceManager {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
 
   /**
     Start the described service.
@@ -64,7 +72,7 @@ service CSpyServiceManager {
 	</pre>
 	
 	where the library specified in libraryName is expected in the same folder as the JSON file itself.
-	
+
     <p>
     Implementations might be asynchronous, so returning from this method will
     not guarantee that the service is present.

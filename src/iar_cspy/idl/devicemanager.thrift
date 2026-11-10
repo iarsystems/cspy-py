@@ -4,6 +4,10 @@ namespace java com.iar.devicemanager
 include "shared.thrift"
 
 const string DEVICEMANAGER_ID = "com.iar.devicemanager.service"
+const shared.ServiceVersion DEVICEMANAGER_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 
 /**
  * Generic error thrown by the device service.
@@ -105,6 +109,9 @@ struct Repository
  */
 service DeviceManager
 {
+	/** Get the service version hosted by the server. */
+	shared.ServiceVersion GetServiceVersion();
+
 	/**
 	 * Gets a list of all known repositories for a given IAR toolchain id (e.g. 'arm')
    *
