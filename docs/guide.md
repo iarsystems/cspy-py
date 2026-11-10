@@ -270,6 +270,20 @@ context, such as a failed configure or a rejected breakpoint location. `exc.diag
 output when the failure looks like a crash. Backend behavior worth knowing
 about is collected in [backend-notes.md](backend-notes.md).
 
+`BusyError` means ProjectManager refused a mutating call (`build()`,
+`load()`, ...) because the IDE is occupied — a modal dialog, build, or
+analysis in progress. It is always retryable; `.info.description` says why:
+
+```python
+import time
+
+try:
+    client.project.build()
+except cspy.BusyError as exc:
+    time.sleep(1)
+    client.project.build()
+```
+
 ## Tests
 
 The pytest plugin comes with the package: pytest loads it wherever

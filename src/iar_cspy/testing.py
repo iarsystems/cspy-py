@@ -16,7 +16,9 @@ The fake replaces :meth:`Client.call`, the registry and the callback-service
 registration; the real IDL is still loaded, so structs built by the package
 (context references, locations) are genuine. Scripted exceptions go through
 the client's real error conversion: a :func:`cspy_exception` surfaces as a
-:class:`~iar_cspy.BackendError`, as it would from a backend.
+:class:`~iar_cspy.BackendError`, and a :func:`project_manager_error` as a
+:class:`~iar_cspy.BusyError` (or plain :class:`~iar_cspy.CSpyError` for a
+non-busy ``errorType``), as they would from a backend.
 """
 
 from __future__ import annotations
@@ -169,6 +171,21 @@ def cspy_exception(
 
     shared = load_thrift_module(str(BUNDLED_IDL_DIR / "shared.thrift"), (str(BUNDLED_IDL_DIR),))
     return shared.CSpyException(code=code, method=method, message=message, culprit=culprit)
+
+
+def project_manager_error(
+    error_type: str = "Busy", description: str = "a build or analysis is in progress"
+) -> Exception:
+    """A genuine ``projectmanager.ProjectManagerError``, as ProjectManager raises it (default: Busy).
+
+    ``error_type`` is a ``ProjectManagerErrorType`` member name (``Busy``,
+    ``Generic``, ``LaunchConfigurationInvalid``, ``LaunchConfigurationNotApplicable``).
+    """
+    from ._thrift import BUNDLED_IDL_DIR, load_thrift_module
+
+    pm = load_thrift_module(str(BUNDLED_IDL_DIR / "projectmanager.thrift"), (str(BUNDLED_IDL_DIR),))
+    error_type_value = getattr(pm.ProjectManagerErrorType, error_type)
+    return pm.ProjectManagerError(description=description, errorType=error_type_value)
 
 
 def _no_callbacks() -> dict[str, Any]:

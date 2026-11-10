@@ -36,6 +36,17 @@ class BackendError(CSpyError):
         self.info = info
 
 
+class BusyError(CSpyError):
+    """ProjectManager refused a mutating call with ``ProjectManagerErrorType.Busy``
+    (a modal dialog, build, or analysis is in progress in the IDE). Retryable:
+    back off and retry.
+    """
+
+    def __init__(self, message: str, info: ProjectManagerErrorInfo, *, diagnostics: str = "") -> None:
+        super().__init__(message, diagnostics=diagnostics)
+        self.info = info
+
+
 class SessionError(CSpyError):
     """An operation was attempted in the wrong debug-session lifecycle state."""
 
@@ -144,6 +155,15 @@ ERROR_CODES: list[dict[str, Any]] = [
         "description": "The backend does not implement the RPC (an older IAR product).",
     },
     {
+        "code": "PROJECTMANAGER_BUSY",
+        "category": "projectmanager",
+        "retryable": True,
+        "description": (
+            "ProjectManager cannot service a mutating call right now (a modal dialog, "
+            "build, or analysis is in progress in the IDE); back off and retry."
+        ),
+    },
+    {
         "code": "UNKNOWN_ERROR",
         "category": "unknown",
         "retryable": False,
@@ -198,6 +218,51 @@ def cspy_exception_info(exc: BaseException) -> CSpyExceptionInfo | None:
     return CSpyExceptionInfo(int(match.group(1)), match.group(2), match.group(3), match.group(4))
 
 
+@dataclass(frozen=True)
+class ProjectManagerErrorInfo:
+    """A decoded ``projectmanager.ProjectManagerError``."""
+
+    error_type: int
+    error_type_name: str | None
+    description: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "error_type": self.error_type,
+            "error_type_name": self.error_type_name,
+            "description": self.description,
+        }
+
+
+def _enum_name(exc: BaseException, field_name: str, value: int) -> str | None:
+    """The enum member name for ``field_name`` on ``exc``, from its ``thrift_spec``."""
+    thrift_spec = getattr(exc, "thrift_spec", None)
+    if not thrift_spec:
+        return None
+    items = thrift_spec.values() if isinstance(thrift_spec, dict) else thrift_spec
+    for item in items:
+        if len(item) >= 3 and item[1] == field_name:
+            names_to_values = getattr(item[2], "_NAMES_TO_VALUES", {})
+            for name, candidate in names_to_values.items():
+                if candidate == value:
+                    return name
+    return None
+
+
+def project_manager_error_info(exc: BaseException) -> ProjectManagerErrorInfo | None:
+    """Decode a ``ProjectManagerError``, duck-typed like :func:`cspy_exception_info`.
+
+    thriftpy2 regenerates a distinct class per IDL load (the same struct may be
+    loaded as distinct classes), so this checks fields, not ``isinstance``.
+    """
+    error_type = getattr(exc, "errorType", None)
+    description = getattr(exc, "description", None)
+    if error_type is None or description is None:
+        return None
+    error_type = int(error_type)
+    return ProjectManagerErrorInfo(error_type, _enum_name(exc, "errorType", error_type), str(description))
+
+
 def with_context(exc: BaseException, message: str) -> CSpyError:
     """A new error saying ``message``, keeping what callers branch on.
 
@@ -210,6 +275,8 @@ def with_context(exc: BaseException, message: str) -> CSpyError:
     info = cspy_exception_info(exc)
     if info is not None:
         return BackendError(message, info, diagnostics=diagnostics)
+    if isinstance(exc, BusyError):
+        return BusyError(message, exc.info, diagnostics=diagnostics)
     if isinstance(exc, SessionError):
         return SessionError(message, diagnostics=diagnostics)
     if isinstance(exc, UnsupportedMethod):
@@ -329,6 +396,14 @@ def classify(
         return entry(code="SESSION_NOT_STARTED", category="lifecycle", message=text, retryable=False)
     if isinstance(exc, UnsupportedMethod):
         return entry(code="UNSUPPORTED_METHOD", category="compatibility", message=text, retryable=False)
+    if isinstance(exc, BusyError):
+        return entry(
+            code="PROJECTMANAGER_BUSY",
+            category="projectmanager",
+            message=text,
+            retryable=True,
+            details={"projectmanager": exc.info.to_dict()},
+        )
 
     # A result code the backend reported is the most specific answer; the
     # text checks below would also match words in its message.

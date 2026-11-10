@@ -27,6 +27,7 @@ from .context import ContextManager
 from .debugger import Debugger
 from .errors import (
     BackendError,
+    BusyError,
     CSpyError,
     NotConnectedError,
     UnsupportedMethod,
@@ -35,6 +36,7 @@ from .errors import (
     describe_cspy_exception,
     error_entry,
     looks_like_backend_fault,
+    project_manager_error_info,
 )
 from .events import Events
 from .ide_services import SERVICE_MANAGER_SERVICE, IdeServices
@@ -269,6 +271,10 @@ class Client:
             return UnsupportedMethod(
                 f"The backend does not implement {label}.{method} (an older IAR product): {exc}", method
             )
+        pm_info = project_manager_error_info(exc)
+        if pm_info is not None and pm_info.error_type_name == "Busy":
+            # Not a backend fault: the IDE is fine, just occupied. No diagnostics.
+            return BusyError(f"{label}.{method}: {pm_info.description}", pm_info)
         info = cspy_exception_info(exc)
         text = describe_cspy_exception(info) if info is not None else f"Thrift RPC failed: {type(exc).__name__}: {exc}"
         log.debug("error %s.%s after %.1fms: %s", label, method, elapsed_ms, _safe_repr(text))

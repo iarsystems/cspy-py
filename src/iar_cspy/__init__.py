@@ -33,9 +33,11 @@ from .debugger import Debugger
 from .discovery import RemoteControlInfo, discover
 from .errors import (
     BackendError,
+    BusyError,
     CSpyError,
     CSpyExceptionInfo,
     NotConnectedError,
+    ProjectManagerErrorInfo,
     SessionError,
     UnsupportedMethod,
     WaitTimeout,
@@ -82,6 +84,7 @@ __all__ = [
     "BackendError",
     "Breakpoints",
     "BuildResult",
+    "BusyError",
     "CSpyError",
     "CSpyExceptionInfo",
     "CleanupResult",
@@ -107,6 +110,7 @@ __all__ = [
     "Project",
     "ProjectDebugResult",
     "ProjectInfo",
+    "ProjectManagerErrorInfo",
     "ProjectNotLoaded",
     "ProjectStatus",
     "Register",

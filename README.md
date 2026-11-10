@@ -131,8 +131,12 @@ when the target did not stop at `stopOnSymbol`. When another frontend owns the
 session (an IDE you connected to), `client.debugger.attach()` adopts it. For
 failures that look like a
 backend crash or reset, `.diagnostics` carries the managed processes' recent
-output. `client.classify_error(exc)` maps any exception onto a stable code
-(`TRANSPORT_CONNECTION_RESET`, `TIMEOUT`, `CSPY_KDCERROR`, ...) with a
+output. `BusyError` means ProjectManager refused a mutating call because the
+IDE is occupied (a modal dialog, build, or analysis in progress; `.info` has
+the decoded `errorType`/`description`) — it is retryable: back off and retry.
+`client.classify_error(exc)` maps any exception onto a stable code
+(`TRANSPORT_CONNECTION_RESET`, `TIMEOUT`, `CSPY_KDCERROR`,
+`PROJECTMANAGER_BUSY`, ...) with a
 `retryable` flag. The waits (`go_and_wait`, `run_to`, the steps,
 `wait_for_state`) raise `WaitTimeout`, or return a result with
 `timed_out=True` when given `check=False`.
