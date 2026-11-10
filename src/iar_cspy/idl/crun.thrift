@@ -5,7 +5,15 @@ include "ServiceRegistry.thrift"
 include "shared.thrift"
 
 const string CRUN_DISPLAY_SERVICE = "crun.display";
+const shared.ServiceVersion CRUN_DISPLAY_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 const string CRUN_BACKEND_SERVICE = "crun.backend";
+const shared.ServiceVersion CRUN_BACKEND_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 
 enum CRunBreakAction
 {
@@ -39,6 +47,9 @@ struct CRunMessage
  */
 service CRunDisplay
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   void itemAdded(1: CRunMessage message, 2: string partnerNamespace);
 
   void itemUpdated(1: CRunMessage message, 2: string partnerNamespace);
@@ -56,6 +67,9 @@ service CRunDisplay
  */
 service CRunBackend
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   void loadFilters(1: string filename);
 
   void saveFilters(1: string filename);

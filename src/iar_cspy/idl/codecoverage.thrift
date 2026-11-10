@@ -4,8 +4,15 @@ namespace java com.iar.cspy.codecoverage
 include "shared.thrift"
 
 const string CODECOVERAGE_SERVICE = "codecoverage";
+const shared.ServiceVersion CODECOVERAGE_VERSION = {
+    "major": 1, // Increment for breaking changes
+    "minor": 0  // Increment for non-breaking changes
+};
 
 service CodeCoverage extends shared.HeartbeatService {
+    /** Get the service version hosted by the server. */
+    shared.ServiceVersion GetServiceVersion();
+
 
     // Return a unique identifier so that the UI can now when data originates
     // from the same session. 

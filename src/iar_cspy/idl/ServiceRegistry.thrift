@@ -1,6 +1,8 @@
 namespace java com.iar.services.registry
 namespace cpp ServiceRegistry.Thrift
 
+include "shared.thrift"
+
 // Name of environment variable used to propagate location of
 // service registry.
 const string IAR_SERVICE_REGISTRY_ENVVAR = "IAR_SERVICE_REGISTRY"
@@ -10,6 +12,10 @@ const string IAR_CSPY_PIPE_PREFIX = "iar-cspy"
 
 // Service name for the registry itself
 const string SERVICE_REGISTRY_SERVICE = "com.iar.thrift.service.registry";
+const shared.ServiceVersion SERVICE_REGISTRY_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 
 enum Protocol {
   Binary,
@@ -52,8 +58,16 @@ exception ServiceException {
   3: string exceptionDescr    // Description of exception (if any)
 }
 
+const shared.ServiceVersion SERVICELISTENER_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
+
 // Listener interface for the service registry.
 service ServiceListener {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   
   // Invoked by the service registry when the set of services changed,
   // according to the filter specified in addServiceListener().
@@ -61,6 +75,9 @@ service ServiceListener {
 }
 
 service CSpyServiceRegistry {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   
   // Wait until a service is available.
   ServiceLocation waitForService(1: string serviceName, 2: i32 timeout) 

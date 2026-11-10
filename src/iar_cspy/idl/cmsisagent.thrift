@@ -172,11 +172,19 @@ exception CMSISAgentException
   1: string message;
 }
 
+const shared.ServiceVersion CMSISAGENT2_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
+
 /*
  * New CMSIS agent service to use together with a full CMSIS Pack enabled workbench.
  */
 service CMSISAgent2 extends shared.HeartbeatService
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   /*
    * Loads a project into the manager.
    */
@@ -256,7 +264,15 @@ struct RteEvent {
   2: string data;
 }
 
+const shared.ServiceVersion CMSISEVENTLISTENER_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
+
 service CMSISEventListener
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   void onRteEvent(1: RteEvent event);
 }

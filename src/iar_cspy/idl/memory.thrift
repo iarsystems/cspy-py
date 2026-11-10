@@ -12,11 +12,19 @@ struct CSpyMemoryBlock
   2: binary status; 
 }
 
+const shared.ServiceVersion CSPYMEMORY_VERSION = {
+    "major": 1, // Increment for breaking changes
+    "minor": 0  // Increment for non-breaking changes
+};
+
 // Do not call the service "Memory", since it will cause the thrift
 // compiler to generate a header file called "Memory.h" which will
 // (on windows) conflict with the system header file with the same name.
 service CSpyMemory 
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   binary readMemory(1: shared.Location location,
     2: i32 wordsize,
     3: i32 bitsize, 

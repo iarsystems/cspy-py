@@ -11,6 +11,10 @@ include "projectmanager.thrift"
 
 // Service identifier
 const string SERVICE_ID = "com.iar.optionsservice";
+const shared.ServiceVersion SERVICE_VERSION = {
+    "major": 1, // Increment for breaking changes
+    "minor": 0  // Increment for non-breaking changes
+};
 
 const string BUILD_ACTION_BUILD_SEQUENCE_OPTION_ID = "BUILDACTION.BuildActions.BuildSequence";
 const string BUILD_ACTION_COMMAND_LINE_OPTION_ID = "BUILDACTION.BuildActions.CommandLine";
@@ -140,6 +144,9 @@ struct CommitOptionStateResponse
 
 service OptionsService
 {
+    /** Get the service version hosted by the server. */
+    shared.ServiceVersion GetServiceVersion();
+
     CreateSessionResponse CreateSession(1: CreateSessionRequest request);
     DestroySessionResponse DestroySession(1: DestroySessionRequest destroySessionRequest);
     GetCategoryTreeResponse GetCategoryTree(1: GetCategoryTreeRequest getCategoryTreeRequest);

@@ -7,6 +7,10 @@ include "shared.thrift"
 
 /** Unique identifier for the Disassembly service */
 const string DISASSEMBLY_SERVICE = "disassembly";
+const shared.ServiceVersion DISASSEMBLY_VERSION = {
+    "major": 1, // Increment for breaking changes
+    "minor": 0  // Increment for non-breaking changes
+};
 
 /** A disassembly operation result, matching a memory location with instructions */
 struct DisassembledLocation {
@@ -18,6 +22,9 @@ struct DisassembledLocation {
 
 /** The Disassembly service retrieves assembler instructions for a specific memory range */
 service Disassembly extends shared.HeartbeatService {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   /** Retrieve a list of disassembled instructions for a specific memory range.*/
   list<DisassembledLocation> disassembleRange(1: shared.Location _from, 
     2: shared.Location _to,

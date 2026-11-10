@@ -4,8 +4,15 @@ namespace java com.iar.cspy.breakpoints
 include "shared.thrift"
 
 const string BREAKPOINTS_SERVICE = "breakpoints";
+const shared.ServiceVersion BREAKPOINTS_VERSION = {
+    "major": 1, // Increment for breaking changes
+    "minor": 0  // Increment for non-breaking changes
+};
 
 service Breakpoints extends shared.HeartbeatService {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   list<shared.Breakpoint> getBreakpoints()
     throws (1: shared.CSpyException e)            
 

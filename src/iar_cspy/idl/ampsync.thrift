@@ -8,14 +8,50 @@ include "ServiceRegistry.thrift"
 const i32 AMP_VERSION = 1
 
 const string CORES_REGISTRY_SERVICE = "com.iar.cspy.ampsync.cores_registry"
+const shared.ServiceVersion CORES_REGISTRY_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 const string PARTNER_REGISTRY_SERVICE = "com.iar.cspy.ampsync.partner_registry"
+const shared.ServiceVersion PARTNER_REGISTRY_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 const string EVENT_BUS_SERVICE = "com.iar.cspy.ampsync.eventbus"
+const shared.ServiceVersion EVENT_BUS_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 const string SESSION_SYNCHRONIZER_SERVICE = "com.iar.cspy.ampsync.session_synchronizer"
+const shared.ServiceVersion SESSION_SYNCHRONIZER_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 const string GATE_KEEPER_SERVICE  = "com.iar.cspy.ampsync.gate_keeper"
+const shared.ServiceVersion GATE_KEEPER_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 const string MULTI_CORE_LOG_SERVICE = "com.iar.cspy.ampsync.multi_core_log"
+const shared.ServiceVersion MULTI_CORE_LOG_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 const string SOFT_CTI_SERVICE = "com.iar.cspy.ampsync.soft_cti"
+const shared.ServiceVersion SOFT_CTI_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 const string CPU_STATUS_POLL_CONTROL_SERVICE = "com.iar.cspy.ampsync.cpu_status_poll_control"
+const shared.ServiceVersion CPU_STATUS_POLL_CONTROL_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 const string DEBUGGER_STARTER_SERVICE="com.iar.cspy.ampsync.debugger_starter"
+const shared.ServiceVersion DEBUGGER_STARTER_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
 
 
 //=============================================================================
@@ -59,6 +95,9 @@ exception UnknownPartner {
 //! Provides information about this debugging session and its participants
 //Fires events on the event bus for AcknowledgePartnerIsAlive and SetPartnerInfo
 service PartnerRegistry extends shared.HeartbeatService {
+	/** Get the service version hosted by the server. */
+	shared.ServiceVersion GetServiceVersion();
+
 	list<PartnerInformation> GetAllPartners();
 	PartnerInformation GetPartnerInfo(1: required PartnerId who) throws (1: UnknownPartner partner);
 	//!When a partner comes up, it should call this to let the worl know its alive
@@ -85,6 +124,9 @@ const string CORES_REGISTRY_UPDATED_EVENT = "core_updated.cores_registry"
 
 //!Provides information about the all cores in a session 
 service CoresRegistry extends shared.HeartbeatService {
+	/** Get the service version hosted by the server. */
+	shared.ServiceVersion GetServiceVersion();
+
 	i32 NumberOfCores();
 	list<CoreInfo> AllCores();
 	CoreInfo GetInfo(1: CoreId coreNumber) throws (1: UnknownPartner partner);
@@ -125,6 +167,9 @@ exception EventBusRegistrationFailed {
 //One idea is to use http://joelpm.com/2009/04/03/thrift-bidirectional-async-rpc.html
 //to handle distributing the events to connected clients. Later though,
 service EventBus extends shared.HeartbeatService {
+	/** Get the service version hosted by the server. */
+	shared.ServiceVersion GetServiceVersion();
+
 	oneway void Fire(1: Event toBeFired);
 	
 	//Until we have BidiThrift implemented, clients have to register them selves to the master server. This is also used to poll for partner aliveness.
@@ -179,6 +224,9 @@ const string SESSION_SYNCHRONIZER_EVENT_PARTNER_ID = "partnerId"
 
 //!Handles synchronization of the partners so as to 
 service SessionSynchronizer extends shared.HeartbeatService {
+	/** Get the service version hosted by the server. */
+	shared.ServiceVersion GetServiceVersion();
+
 	SessionState SyncTo(1: PartnerId who, 2:SessionState destState)
 	SessionState CurrentState(1: PartnerId who)
 	list<SessionState> AllStates()
@@ -225,6 +273,9 @@ enum CoreStatus {
 }
 
 service Gatekeeper extends shared.HeartbeatService {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   // Setup and initialization
   void SetRunAllCores(1: bool all)
   void SetStartOneStartsAll(1: bool on)
@@ -286,7 +337,15 @@ const string EXEC_CONTROL_SET_RUNONE_EVENT = "runone.exec_control"
 //go and stop events may have multiple cores, each gets its own key with this as a prefix. e.g. core0=>"17" core1=>"3"
 const string EXEC_CONTROL_EVENT_CORE_KEY_PREFIX = "core"
 
+const shared.ServiceVersion EXECUTIONCONTROL_VERSION = {
+	"major": 1, // Increment for breaking changes
+	"minor": 0  // Increment for non-breaking changes
+};
+
 service ExecutionControl {
+	/** Get the service version hosted by the server. */
+	shared.ServiceVersion GetServiceVersion();
+
 	oneway void Go(1: CoreId core);
 	oneway void Stop(1: CoreId core);
 	oneway void MultiStop();
@@ -297,6 +356,9 @@ service ExecutionControl {
 //=============================================================================
 //Multicorelogging.
 service MultiCoreLog {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   void Log(1: CoreRange cores, 2: i32 color, 3: string timeStamp, 4: string text);
 }
 
@@ -309,6 +371,9 @@ const string SOFT_CTI_EVENT_CORE_KEY_PREFIX = "core"
 const string SOFT_CTI_EVENT_ID_KEY_PREFIX = "id"
 
 service SoftCTI {
+  	/** Get the service version hosted by the server. */
+  	shared.ServiceVersion GetServiceVersion();
+
   	void SetSoftCTI(1: bool on);
   	bool GetSoftCTI();
 	oneway void CoreStarting(1: CoreId core);
@@ -325,6 +390,9 @@ const string CPU_STATUS_POLL_CONTROL_ENABLE_EVENT        = "enable.cpu_status_po
 //const string SOFT_CTI_EVENT_ID_KEY_PREFIX = "id"
 
 service CPUStatusPollControl {
+  	/** Get the service version hosted by the server. */
+  	shared.ServiceVersion GetServiceVersion();
+
   	void SetCPUStatusPoll(1: CoreId core, 2: bool on);
   	bool GetCPUStatusPoll();
 }
@@ -349,6 +417,9 @@ exception FailedToStartPartner {
 }
 
 service DebuggerStarter extends shared.HeartbeatService {
+	/** Get the service version hosted by the server. */
+	shared.ServiceVersion GetServiceVersion();
+
 	void Configure(1: string stageDir, 2: Tools defaultTool);
 	
 	ServiceRegistry.ServiceLocation StartServiceRegistry();

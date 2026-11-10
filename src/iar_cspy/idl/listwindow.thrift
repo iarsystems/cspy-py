@@ -200,8 +200,16 @@ struct ToolbarNote
 
 const string SLIDING_POS_NONE = "";
 
+const shared.ServiceVersion LISTWINDOWFRONTEND_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
+
 service ListWindowFrontend
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   oneway void notify(1: Note note);
   oneway void notifyToolbar(1: ToolbarNote note);
 }
@@ -216,13 +224,17 @@ struct ToolbarItemState
   5: string str;
 }
 
+const shared.ServiceVersion LISTWINDOWBACKEND_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
+
 /*
  * The ListWindowModel service is a wrapper around the various types of
  * IfListModel-based classes, but with a few changes.
  *
  * - Sequence numbers are not exposed through this interface.
- * - The model lifecycle sequence of events
- *   are handled automatically. In other words: clients just need to
+ * - The sequence of events is handled automatically. In other words: clients just need to
  *   connect to the model and start calling methods. The service will make
  *   sure that the appropriate methods will be called. For example,
  *   any attempt to query the model contents will result in an implicit
@@ -235,6 +247,9 @@ struct ToolbarItemState
  */
 service ListWindowBackend extends shared.HeartbeatService
 {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
   // Connect to the model. This method must be the very first method called on the
   // model, except where otherwise stated.
   void connect(1: ServiceRegistry.ServiceLocation listener),

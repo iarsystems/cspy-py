@@ -1,4 +1,5 @@
 namespace cpp Timeline
+namespace java com.iar.timeline.websocket
 
 enum SourceType {
   DataLog = 1,

@@ -5,6 +5,10 @@ namespace java com.iar.logservice
 include "shared.thrift"
 
 const string LOGSERVICE_ID = "com.iar.thrift.service.logservice";
+const shared.ServiceVersion LOGSERVICE_VERSION = {
+  "major": 1, // Increment for breaking changes
+  "minor": 0  // Increment for non-breaking changes
+};
 
 enum LogSeverity
 {
@@ -49,6 +53,9 @@ struct LogEntry
  * platform.
  */
 service LogService extends shared.HeartbeatService {
+  /** Get the service version hosted by the server. */
+  shared.ServiceVersion GetServiceVersion();
+
 
   void addCategory(1: string category)
   void removeCategory(1: string category)
