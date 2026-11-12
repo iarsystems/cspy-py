@@ -55,6 +55,7 @@ def test_dialogs_are_cancelled_and_aliases_take_the_suggestion(fake, backend_sid
     assert conn.openElementSelectionDialog("Core", "Pick a core", ["a", "b"]) == -1
     assert conn.openMultipleElementSelectionDialog("Cores", "", ["a", "b"]) == []
     assert conn.resolveAliasForFile("C:/build/main.c", "/home/me/main.c") == "/home/me/main.c"
+    assert conn.resolveAliasForFile("C:/build/util.c", "") == "C:/build/util.c"  # no suggestion: keep it
     result = conn.invokeDialog("dlg", "Settings", fe.shared.PropertyTreeItem(key="k", value="v", children=[]))
     assert result.type == fe.GenericDialogReturnType.kCancel and result.items.value == "v"
     kinds = [p.kind for p in client.frontend.prompts]
@@ -65,6 +66,7 @@ def test_dialogs_are_cancelled_and_aliases_take_the_suggestion(fake, backend_sid
         "save_dialog",
         "selection",
         "selection",
+        "alias",
         "alias",
         "dialog",
     ]
