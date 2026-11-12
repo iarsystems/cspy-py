@@ -112,11 +112,12 @@ converts any of them to dicts and lists. The package's own types (`CoreState`,
 `iar_cspy`; `.to_dict()` gives plain data.
 
 Launch configurations are one entry of a C-SPY VS Code `launch.json`.
-`LaunchConfig.from_file()` reads one, picking a configuration by name and
-resolving relative paths. Anything that takes a launch configuration also
-accepts a dict, JSON text or a path. For Embedded Workbench projects,
-`client.project.start_debugging()` uses the project's own configuration, so no
-launch.json is needed.
+`LaunchConfig.from_file()` reads one, picking a configuration by name.
+Anything that takes a launch configuration also accepts a dict, JSON text or a
+path. `${workspaceFolder}` becomes the current
+directory and relative paths in fields are made absolute against it.
+For Embedded Workbench projects, `client.project.start_debugging()` uses
+the project's own configuration, so no launch.json is needed.
 
 ## Errors
 

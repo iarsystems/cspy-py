@@ -467,6 +467,37 @@ def test_launch_config_from_file_resolves_paths(tmp_path):
     assert LaunchConfig.coerce(str(tmp_path / "launch.json")) == first
 
 
+def test_launch_config_resolves_all_path_fields():
+    cwd = Path(os.getcwd())
+    data = {
+        "program": "${workspaceFolder}/a.out",
+        "projectPath": "test.ewp",
+        "setupMacros": ["setup.mac", "/abs/s.mac"],
+        "plugins": ["${workspaceFolder}/p.so"],
+        "driverOptions": ["--cpu=Cortex-M3", "--macro=${workspaceFolder}/m.mac", "--backend", "rel/x.ddf"],
+        "download": {
+            "flashLoader": "flash/f.board",
+            "deviceMacros": ["${workspaceFolder}/d.mac", "d2.mac"],
+            "extraImages": [{"image": "extra.out", "offset": 0}],
+        },
+    }
+    original = json.loads(json.dumps(data))
+    for config in (LaunchConfig.from_obj(data), LaunchConfig.coerce(data), LaunchConfig.from_json(json.dumps(data))):
+        assert config["program"] == str(cwd / "a.out")
+        assert config["projectPath"] == str(cwd / "test.ewp")
+        assert config["setupMacros"] == [str(cwd / "setup.mac"), "/abs/s.mac"]
+        assert config["plugins"] == [str(cwd / "p.so")]
+        # Mixed fields: ${workspaceFolder} substituted, relative values left alone.
+        assert config["driverOptions"] == ["--cpu=Cortex-M3", f"--macro={cwd}/m.mac", "--backend", "rel/x.ddf"]
+        download = config["download"]
+        assert download["flashLoader"] == str(cwd / "flash" / "f.board")
+        assert download["deviceMacros"] == [str(cwd / "d.mac"), str(cwd / "d2.mac")]
+        assert download["extraImages"] == [{"image": str(cwd / "extra.out"), "offset": 0}]
+        # Resolving is idempotent.
+        assert LaunchConfig.from_obj(config) == config
+    assert data == original  # the input is not modified
+
+
 def test_launch_config_from_json():
     assert LaunchConfig.from_json('{"stopOnSymbol": "main"}').stop_on_symbol == "main"
     assert LaunchConfig.from_json('{"configurations": [{"name": "x"}]}') == {"name": "x"}
