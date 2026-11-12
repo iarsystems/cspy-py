@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+from pathlib import Path
 
 import pytest
 
@@ -139,6 +140,29 @@ def test_is_process_alive(monkeypatch):
     monkeypatch.setattr(discovery.os, "name", "posix")
     assert is_process_alive(os.getpid()) is True
     assert is_process_alive(999999999) is False
+
+
+def test_default_local_running_state_folder_posix_default(monkeypatch):
+    # os.name can't be monkeypatched here: pathlib picks WindowsPath/PosixPath
+    # from the real os.name, and refuses to build the other flavor.
+    if os.name != "posix":
+        pytest.skip("exercises the non-Windows branch")
+    monkeypatch.delenv("IAR_SETTINGS_DIR", raising=False)
+    assert discovery._default_local_running_state_folder() == Path.home() / ".iar"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="exercises the Windows branch")
+def test_default_local_running_state_folder_windows_default(monkeypatch):
+    monkeypatch.delenv("IAR_SETTINGS_DIR", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\someone\AppData\Local")
+    assert discovery._default_local_running_state_folder() == Path(
+        r"C:\Users\someone\AppData\Local"
+    ) / "IAR Embedded Workbench"
+
+
+def test_default_local_running_state_folder_honors_iar_settings_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("IAR_SETTINGS_DIR", str(tmp_path))
+    assert discovery._default_local_running_state_folder() == tmp_path / "IAR Embedded Workbench"
 
 
 # -- Backend.registry_endpoint() integration ----------------------------------
