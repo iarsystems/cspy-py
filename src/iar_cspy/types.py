@@ -286,6 +286,34 @@ class TerminalOutput(_Result):
 
 
 @dataclass
+class FrontendPrompt(_Result):
+    """Something the backend asked of (or told) the headless frontend.
+
+    ``kind`` is a prompt (``message_box``, ``file_dialog``, ``save_dialog``,
+    ``directory_dialog``, ``selection``, ``alias``, ``dialog``) or a notice
+    (``message``, ``edit_source``, ``show_view``, ...). ``method`` is the
+    ``frontend.thrift`` RPC. For a prompt, ``answer`` is what was returned and
+    ``answered_by`` is ``"default"``, ``"rule"`` or ``"handler"``; for a
+    notice both are None.
+    """
+
+    kind: str
+    method: str
+    title: str
+    message: str
+    details: dict[str, Any]
+    answer: Any
+    answered_by: str | None
+    time: float
+
+    def summary(self) -> str:
+        text = " / ".join(x for x in (self.title, self.message) if x) or self.method
+        if self.answered_by is None:
+            return f"{self.kind}: {text!r}"
+        return f"{self.kind}: {text!r} -> {self.answer!r} ({self.answered_by})"
+
+
+@dataclass
 class BuildResult(_Result):
     project: dict[str, Any]
     configuration: str
