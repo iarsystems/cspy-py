@@ -1,8 +1,22 @@
-"""List windows (trace, and other tabular debugger views) over ``listwindow.thrift``.
+"""List windows (trace, and other tabular debugger views).
 
-A list window backend is a service registered under its own name. Before
-use, a frontend must ``connect`` to it, handing over the location of a
-``ListWindowFrontend`` service for notifications; this process hosts that.
+Two hosts implement these entirely differently, and which one answers
+depends on what is registered:
+
+* CSpyServer2 registers one ``ListWindowBackend`` (``listwindow.thrift``)
+  per window, under its own name. A frontend must ``connect`` to it first,
+  handing over the location of a ``ListWindowFrontend`` service for
+  notifications; this process hosts that. Sliding windows, navigation and
+  trace control all work.
+* An IDE registers one shared, read-only ``ListWindowSnapshot``
+  (``listwindowsnapshot.thrift``) under ``listwindow.snapshot``, covering the
+  windows it has open. No notifications, no sliding windows, no trace control.
+
+Whenever ``listwindow.snapshot`` is registered it is the implementation used,
+and calls it cannot serve raise :class:`~iar_cspy.errors.UnsupportedMethod`.
+The two use different window ids (a registry service name vs. a model name
+like ``"Watch"``), so take ids from :meth:`ListWindows.services` rather than
+hardcoding them.
 """
 
 from __future__ import annotations
@@ -13,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from ._callbacks import CallbackServer
 from ._thrift import coerce_call_args, to_plain
-from .errors import CSpyError
+from .errors import CSpyError, UnsupportedMethod
 from .types import ListWindowChunk, ListWindowOverview, ListWindowRows, TraceStatus
 
 if TYPE_CHECKING:
@@ -36,6 +50,13 @@ class _ListWindowFrontendHandler:
 class ListWindows:
     """Discovery of list windows and their notifications (``client.listwindows``)."""
 
+    _SNAPSHOT_SERVICE = "listwindow.snapshot"
+    # Answerable without the backend: the snapshot interface never reports a sliding
+    # window, and setVisibleRows is a prefetch hint with no observable semantics.
+    _SNAPSHOT_LOCAL_ANSWERS: dict[str, Any] = {"isSliding": False, "setVisibleRows": None}
+    # Forwarded, with the window id prepended as the first argument.
+    _SNAPSHOT_FORWARDED = frozenset({"getDisplayName", "getListSpec", "getColumnInfo", "getNumberOfRows", "getRow"})
+
     def __init__(self, client: Client) -> None:
         self._client = client
         self._lock = threading.Lock()
@@ -47,8 +68,72 @@ class ListWindows:
         )
 
     def services(self, name_filter: str = "listwindow") -> list[dict[str, Any]]:
-        """Registry entries whose name contains ``name_filter``."""
-        return self._client.registry.services(name_filter)
+        """The list windows this host offers, whose name contains ``name_filter``.
+
+        Each entry is ``{name, host, port, protocol, transport, source, open}``,
+        the same shape from either implementation. ``name`` is the id to pass to
+        :meth:`window`.
+        """
+        endpoint = self._snapshot_endpoint()
+        if endpoint is None:
+            entries = self._client.registry.services(name_filter)
+            return [{**entry, "source": "backend", "open": True} for entry in entries]
+        return self._snapshot_services(endpoint, name_filter)
+
+    def read_only(self) -> bool:
+        """Whether this host serves list windows read-only.
+
+        True when the host offers only the shared ``listwindow.snapshot``
+        service (an IDE): rows and columns can be read, but trace control and
+        sliding-window navigation raise
+        :class:`~iar_cspy.errors.UnsupportedMethod`.
+        """
+        return self._snapshot_endpoint() is not None
+
+    def _snapshot_endpoint(self) -> tuple[str, int] | None:
+        entry = self._client.registry.lookup(self._SNAPSHOT_SERVICE)
+        if entry is None or int(entry.get("transport", -1)) != 0 or int(entry.get("port", 0) or 0) <= 0:
+            return None
+        return str(entry["host"]), int(entry["port"])
+
+    def _snapshot_services(self, endpoint: tuple[str, int], name_filter: str) -> list[dict[str, Any]]:
+        client = self._client
+        service_cls = client.idl.service("listwindowsnapshot.thrift", "ListWindowSnapshot")
+        host, port = endpoint
+        conn = client._connect(service_cls, host, port, self._SNAPSHOT_SERVICE)
+        try:
+            open_windows = {str(w) for w in client.traced(self._SNAPSHOT_SERVICE, "getOpenWindows", conn.getOpenWindows)}
+            try:
+                available = {
+                    str(w) for w in client.traced(self._SNAPSHOT_SERVICE, "getAvailableWindows", conn.getAvailableWindows)
+                }
+            except Exception:  # noqa: BLE001
+                available = set()
+            windows = open_windows | available
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+        query = name_filter.strip().lower()
+        # The default is a substring of every ListWindowBackend registry name, but not of
+        # snapshot ids, which are model names like "Watch". Treat it as "no filter".
+        if query == "listwindow":
+            query = ""
+        return [
+            {
+                "name": w,
+                "host": host,
+                "port": port,
+                "protocol": 0,
+                "transport": 0,
+                "source": "snapshot",
+                "open": w in open_windows,
+            }
+            for w in sorted(windows)
+            if not query or query in w.lower()
+        ]
 
     def window(self, service_name: str) -> ListWindow:
         return ListWindow(self, service_name)
@@ -77,8 +162,55 @@ class ListWindows:
         with self._lock:
             return service_name in self._connected
 
+    def _call_snapshot(
+        self, endpoint: tuple[str, int], window_id: str, method: str, args: tuple[Any, ...], trace: bool
+    ) -> Any:
+        if trace or not (method in self._SNAPSHOT_LOCAL_ANSWERS or method in self._SNAPSHOT_FORWARDED):
+            raise UnsupportedMethod(
+                f"'{method}' is not available for list window '{window_id}': this host serves list windows "
+                "read-only through the listwindow snapshot service, which has no trace control and no "
+                "sliding windows.",
+                method,
+            )
+        if method in self._SNAPSHOT_LOCAL_ANSWERS:
+            return self._SNAPSHOT_LOCAL_ANSWERS[method]
+
+        client = self._client
+        service_cls = client.idl.service("listwindowsnapshot.thrift", "ListWindowSnapshot")
+        host, port = endpoint
+        conn = client._connect(service_cls, host, port, self._SNAPSHOT_SERVICE)
+        try:
+            open_windows = [str(w) for w in client.traced(self._SNAPSHOT_SERVICE, "getOpenWindows", conn.getOpenWindows)]
+            resolved = next(
+                (w for w in open_windows if w == window_id),
+                next((w for w in open_windows if w.lower() == window_id.lower()), None),
+            )
+            if resolved is None:
+                available = [
+                    str(w) for w in client.traced(self._SNAPSHOT_SERVICE, "getAvailableWindows", conn.getAvailableWindows)
+                ]
+                resolved = next((w for w in available if w.lower() == window_id.lower()), None)
+                if resolved is not None:
+                    client.traced(self._SNAPSHOT_SERVICE, "showWindow", conn.showWindow, resolved, True, False)
+            if resolved is None:
+                raise CSpyError(
+                    f"List window '{window_id}' is not open in the IDE. "
+                    f"Open windows: {', '.join(open_windows) or '<none>'}."
+                )
+            return client.traced(f"{self._SNAPSHOT_SERVICE}[{resolved}]", method, getattr(conn, method), resolved, *args)
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
     def call(self, service_name: str, method: str, *args: Any, trace: bool = False) -> Any:
-        """Call a ``ListWindowBackend`` (or with ``trace``, ``TraceListWindowBackend``) method."""
+        """Call a list window method, on whichever implementation this host offers."""
+        # Before the frontend server below: a snapshot host never calls back.
+        endpoint = self._snapshot_endpoint()
+        if endpoint is not None:
+            return self._call_snapshot(endpoint, service_name, method, args, trace)
+
         client = self._client
         mod = client.idl.module("listwindow.thrift")
         service_cls = client.idl.service("listwindow.thrift", "TraceListWindowBackend" if trace else "ListWindowBackend")
