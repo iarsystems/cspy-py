@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Union
 
-from ._session import requires_session
+from ._session import requires_started_session
 from ._thrift import to_plain
 from .errors import CSpyError
 from .types import Context, SymbolLookup, VisibleSymbols
@@ -63,31 +63,31 @@ class ContextManager:
     def _call(self, method: str, *args: Any) -> Any:
         return self._client.call("contextmanager", method, *args)
 
-    @requires_session
+    @requires_started_session
     def stack(self, low: int = 0, high: int = 20, *, context: ContextLike = None) -> list[Any]:
         """Frames ``low`` to ``high`` of the call stack (``ContextInfo`` structs)."""
         return self._call("getStack", context_ref(self._client, context), int(low), int(high))
 
-    @requires_session
+    @requires_started_session
     def depth(self, max_depth: int = 256, *, context: ContextLike = None) -> int:
         return int(self._call("getStackDepth", context_ref(self._client, context), int(max_depth)))
 
-    @requires_session
+    @requires_started_session
     def info(self, *, context: ContextLike = None) -> Any:
         """Function name, execution location and source ranges of a context."""
         return self._call("getContextInfo", context_ref(self._client, context))
 
-    @requires_session
+    @requires_started_session
     def locals(self, *, context: ContextLike = None) -> list[Any]:
         """Local variables (``Symbol`` structs)."""
         return self._call("getLocals", context_ref(self._client, context))
 
-    @requires_session
+    @requires_started_session
     def parameters(self, *, context: ContextLike = None) -> list[Any]:
         """Function parameters (``Symbol`` structs)."""
         return self._call("getParameters", context_ref(self._client, context))
 
-    @requires_session
+    @requires_started_session
     def visible_symbols(self, *, context: ContextLike = None) -> VisibleSymbols:
         """Names of the locals and parameters in scope; ``.all`` merges both without duplicates."""
         ref = context_ref(self._client, context)

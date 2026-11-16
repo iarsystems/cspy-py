@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator
 
 from . import _legacy_launch
-from ._session import requires_session
+from ._session import requires_started_session
 from ._thrift import to_plain
 from .backend import MULTICORE_OPTION
 from .context import ContextLike, context_ref
@@ -266,15 +266,15 @@ class Debugger:
         """RPC method names of the Debugger service."""
         return self._client.methods("debugger")
 
-    @requires_session
+    @requires_started_session
     def core_count(self) -> int:
         return int(self._call("getNumberOfCores"))
 
-    @requires_session
+    @requires_started_session
     def core_state(self, core: int = 0) -> CoreState | int:
         return _core_state(self._call("getCoreState", int(core)))
 
-    @requires_session
+    @requires_started_session
     def core_states(self) -> list[CoreState | int]:
         return [self.core_state(idx) for idx in range(max(0, self.core_count()))]
 
@@ -654,12 +654,12 @@ class Debugger:
 
     # -- run control -----------------------------------------------------------
 
-    @requires_session
+    @requires_started_session
     def go(self) -> None:
         """Start execution; returns immediately (see :meth:`go_and_wait`)."""
         self._call("go")
 
-    @requires_session
+    @requires_started_session
     def halt(self) -> None:
         """Stop execution (``Debugger.stop``).
 
@@ -668,26 +668,26 @@ class Debugger:
         """
         self._call("stop")
 
-    @requires_session
+    @requires_started_session
     def reset(self) -> None:
         """Reset the target per the active reset style."""
         self._call("reset")
 
-    @requires_session
+    @requires_started_session
     def step_over(
         self, enter_functions_without_source: bool | None = None, *, wait: bool = True, timeout: float = DEFAULT_TIMEOUT
     ) -> WaitResult | None:
         """Step over one source statement; by default waits until it has stopped again."""
         return self._step("stepOver", enter_functions_without_source, wait, timeout)
 
-    @requires_session
+    @requires_started_session
     def step_into(
         self, enter_functions_without_source: bool | None = None, *, wait: bool = True, timeout: float = DEFAULT_TIMEOUT
     ) -> WaitResult | None:
         """Step into one source statement; by default waits until it has stopped again."""
         return self._step("step", enter_functions_without_source, wait, timeout)
 
-    @requires_session
+    @requires_started_session
     def step_out(self, *, wait: bool = True, timeout: float = DEFAULT_TIMEOUT) -> WaitResult | None:
         """Run until the current function returns; by default waits until it has."""
         return self._step("stepOut", None, wait, timeout)
@@ -707,7 +707,7 @@ class Debugger:
             return None
         return self._run_and_wait(action, CoreState.STOPPED, core=0, timeout=timeout, poll_interval=0.05, check=True)
 
-    @requires_session
+    @requires_started_session
     def run_to(
         self, ule: str, *, allow_single_step: bool = True, timeout: float = DEFAULT_TIMEOUT, wait: bool = True
     ) -> WaitResult | None:
@@ -723,7 +723,7 @@ class Debugger:
             return None
         return self._run_and_wait(action, CoreState.STOPPED, core=0, timeout=timeout, poll_interval=0.05, check=True)
 
-    @requires_session
+    @requires_started_session
     def wait_for_state(
         self,
         state: CoreState | int = CoreState.STOPPED,
@@ -744,7 +744,7 @@ class Debugger:
             poll_interval=poll_interval, check=check,
         )
 
-    @requires_session
+    @requires_started_session
     def go_and_wait(
         self,
         state: CoreState | int = CoreState.STOPPED,
@@ -843,7 +843,7 @@ class Debugger:
 
     # -- target data -----------------------------------------------------------
 
-    @requires_session
+    @requires_started_session
     def eval(
         self,
         expression: str,
@@ -879,29 +879,29 @@ class Debugger:
             raise CSpyError(f"{expression!r} did not evaluate to an integer: {getattr(value, 'value', None)!r}")
         return int(text, 10)
 
-    @requires_session
+    @requires_started_session
     def modules(self) -> list[Any]:
         """Loaded modules (``ModuleData`` structs)."""
         return self._call("getModules")
 
-    @requires_session
+    @requires_started_session
     def load_module(self, filename: str) -> None:
         self._call("loadModule", str(filename))
 
-    @requires_session
+    @requires_started_session
     def threads(self) -> list[Any]:
         return self._call("getThreadList")
 
-    @requires_session
+    @requires_started_session
     def cycle_counter(self, core: int = 0) -> int:
         return int(self._call("getCycleCounter", int(core)))
 
-    @requires_session
+    @requires_started_session
     def zones(self) -> list[Any]:
         """Memory zones (``ZoneInfo`` structs); zone ids are what memory calls take."""
         return self._call("getAllZones")
 
-    @requires_session
+    @requires_started_session
     def registers(self, group: str = "CPU Registers (ABI)", limit: int | None = None) -> RegisterSnapshot:
         """Metadata and values of the registers in ``group`` (the first ``limit``, if given).
 

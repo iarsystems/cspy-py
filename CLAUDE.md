@@ -39,7 +39,7 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 - `pytest_plugin.py`: `cspy_client` / `cspy_session` fixtures, `--cspy-*`
   options, the `live` marker. Registered through a `pytest11` entry point, so
   it loads wherever the package is installed (not through `pytest.ini`).
-- `_session.py`: `requires_session`, the package's session guard.
+- `_session.py`: `requires_started_session`, the package's session guard.
 - `_legacy_launch.py`: session configuration and launch sequence for
   products without `resolveLaunchConfiguration`.
 - `discovery.py`: `discover()`/`RemoteControlInfo` — find a running IDE's
