@@ -44,9 +44,14 @@ same shape regardless of which of the three ways above is in play:
 - **Possibly repeat** — if find comes up empty, or a resolve fails, the next
   call just runs find again. The one exception is discovery's result, which
   is cached once reachable (re-scanning the filesystem and re-probing on
-  every RPC would be wasteful): `Backend.forget_registry()` drops that cache,
-  and `Client.endpoint()` calls it reactively on a failed resolve — the
-  "reconnect when disconnected" half of discovery. `Backend.wait_for_registry(timeout_s)`
+  every RPC would be wasteful): `Backend.forget_registry()` drops that cache.
+  `ServiceRegistry._call()` (`registry.py`) calls it reactively on any failed
+  registry RPC — the "reconnect when disconnected" half of discovery. This
+  lives in `ServiceRegistry` rather than only in `Client.endpoint()` so it
+  applies uniformly to every call site that talks to the registry directly
+  (`services()`/`lookup()`/`resolve()`, used by `ide_services.py`,
+  `events.py`, `listwindow.py`), not just RPCs routed through `Client.call()`.
+  `Backend.wait_for_registry(timeout_s)`
   is the blocking version of find, for a caller that wants to wait rather
   than poll (`connect(discovery_timeout=...)`); managed mode and an explicit
   `registry_uri` have nothing to forget (managed already self-heals every

@@ -89,10 +89,10 @@ def test_libsupport_is_registered_on_every_call(fake):
     client.terminal.server.stop()
 
 
-def test_registration_needs_a_registry():
+def test_registration_needs_a_registry(tmp_path):
     from iar_cspy.testing import fake_client
 
-    client, _ = fake_client(Config(mode="standalone"))
+    client, _ = fake_client(Config(mode="standalone", auto_discovery_dir=tmp_path))
     assert client.events.ensure_registered() == {"ok": False, "reason": "no-registry-port"}
     assert client.terminal.ensure_registered() == {"ok": False, "reason": "no-registry-port"}
     disabled, _ = fake_client(Config(mode="standalone", registry_uri="thrift://127.0.0.1:1", auto_eventhandler=False))

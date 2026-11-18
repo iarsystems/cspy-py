@@ -133,8 +133,8 @@ def test_wait_for_registry_discovery_times_out(tmp_path):
     assert time.monotonic() - start < 2.0
 
 
-def test_wait_for_registry_raises_immediately_for_no_registry():
-    backend = Backend(Config(mode="standalone"))
+def test_wait_for_registry_raises_immediately_for_no_registry(tmp_path):
+    backend = Backend(Config(mode="standalone", auto_discovery_enabled=False))
     with pytest.raises(NotConnectedError):
         backend.wait_for_registry(timeout_s=5)
 
@@ -208,6 +208,42 @@ def test_endpoint_forgets_the_registry_on_a_failed_resolve(tmp_path, listening_p
     assert not scans, "still cached: the failed resolve itself shouldn't trigger a rescan"
     client.backend.registry_endpoint()  # the endpoint was forgotten, so this scans again
     assert scans
+
+
+def test_registry_lookup_forgets_the_registry_on_a_failed_call(tmp_path):
+    """Regression test for TODO.md #22: a call site that bypasses Client.endpoint()
+    (ide_services.py/events.py/listwindow.py use registry.services()/lookup()/resolve()
+    directly) must still self-heal from a stale discovered endpoint.
+    """
+    old_sock = socket.socket()
+    old_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    old_sock.bind(("127.0.0.1", 0))
+    old_sock.listen(1)
+    old_port = old_sock.getsockname()[1]
+
+    new_sock = socket.socket()
+    new_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    new_sock.bind(("127.0.0.1", 0))
+    new_sock.listen(1)
+    new_port = new_sock.getsockname()[1]
+
+    try:
+        write_remote_file(tmp_path, "live", remote_control_service_registry=f"thrift://127.0.0.1:{old_port}")
+        client = cspy.Client(Config(mode="standalone", auto_discovery_dir=tmp_path))
+        assert client.backend.registry_endpoint() == ("127.0.0.1", old_port)
+
+        # The old session's registry goes away; a new one starts and writes its own file.
+        old_sock.close()
+        write_remote_file(tmp_path, "live", remote_control_service_registry=f"thrift://127.0.0.1:{new_port}")
+
+        # A direct registry.lookup() (bypassing Client.endpoint()) hits the stale cache...
+        with pytest.raises(cspy.CSpyError):
+            client.registry.lookup("debugger.eventhandler")
+
+        # ...but, unlike the pre-fix behavior, it self-heals: the next find rediscovers.
+        assert client.backend.registry_endpoint() == ("127.0.0.1", new_port)
+    finally:
+        new_sock.close()
 
 
 # -- Client.endpoint() / NotConnectedError -------------------------------------
