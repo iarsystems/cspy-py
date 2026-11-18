@@ -59,6 +59,11 @@ def test_classify_transport_and_lifecycle_errors():
     assert classify(ValueError("?"))["code"] == "UNKNOWN_ERROR"
 
 
+def test_classify_crun_errors():
+    out = classify(CSpyError("C-RUN is not initialized"))
+    assert (out["code"], out["category"], out["retryable"]) == ("CRUN_NOT_INITIALIZED", "crun", False)
+
+
 def test_classify_attaches_diagnostics_only_for_backend_faults():
     diagnostics = lambda: {"backend_diagnostics": "tail", "service_launcher_diagnostics": ""}  # noqa: E731
     assert classify(CSpyError("connection reset"), diagnostics=diagnostics)["backend_diagnostics"] == "tail"

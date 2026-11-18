@@ -24,6 +24,7 @@ from .backend import Backend
 from .breakpoints import Breakpoints
 from .config import Config
 from .context import ContextManager
+from .crun import Crun
 from .debugger import Debugger
 from .errors import (
     BackendError,
@@ -57,6 +58,7 @@ SERVICES: dict[str, tuple[str | None, str]] = {
     "debugger": (None, "Debugger"),
     "contextmanager": (None, "ContextManager"),
     "breakpoints": ("breakpoints.thrift", "Breakpoints"),
+    "crun": ("crun.thrift", "CRunBackend"),
     "memory": ("memory.thrift", "CSpyMemory"),
     "disassembly": ("disassembly.thrift", "Disassembly"),
     "sourcelookup": ("sourcelookup.thrift", "SourceLookup"),
@@ -70,7 +72,7 @@ SERVICES: dict[str, tuple[str | None, str]] = {
 _IDE_SERVICE_KEYS = {"projectmanager", "options"}
 
 #: Services whose state lives in the debug session of one CSpyServer2 process.
-_SESSION_SERVICE_KEYS = {"debugger", "contextmanager", "breakpoints", "memory", "disassembly", "sourcelookup"}
+_SESSION_SERVICE_KEYS = {"debugger", "contextmanager", "breakpoints", "crun", "memory", "disassembly", "sourcelookup"}
 
 
 def _safe_repr(value: Any, max_len: int = 180) -> str:
@@ -112,6 +114,7 @@ class Client:
         self.listwindows = ListWindows(self)
         self.debugger = Debugger(self)
         self.breakpoints = Breakpoints(self)
+        self.crun_rules = Crun(self)
         self.context = ContextManager(self)
         self.memory = Memory(self)
         self.disassembly = Disassembly(self)
@@ -155,6 +158,8 @@ class Client:
             return "debugger.contextmanager"
         if service == "memory":
             return "debugger.memory"
+        if service == "crun":
+            return "crun.backend"
         if service in _IDE_SERVICE_KEYS:
             return self.ide_services.registry_name(service)
         if service == "servicemanager":
