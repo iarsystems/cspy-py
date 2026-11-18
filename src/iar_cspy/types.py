@@ -36,6 +36,19 @@ class AccessType(IntEnum):
     READ_WRITE = 4
 
 
+class CRunBreakAction(IntEnum):
+    """What happens when a C-RUN runtime-check message matches a rule (``crun.CRunBreakAction``).
+
+    Values match the thrift enum (``kStopAndLog``, ``kLog``, ``kIgnore``)
+    directly; :meth:`~iar_cspy.crun.Crun.set_default_action` accepts this
+    enum, its value, or its name as a string.
+    """
+
+    STOP_AND_LOG = 0
+    LOG = 1
+    IGNORE = 2
+
+
 class CodeBreakpointMode(str, Enum):
     """The kind of code breakpoint to set; each maps to a driver's breakpoint category.
 
