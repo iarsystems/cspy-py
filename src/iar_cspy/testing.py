@@ -201,6 +201,35 @@ def project_manager_error(
     return pm.ProjectManagerError(description=description, errorType=error_type_value)
 
 
+def crun_message(**fields: Any) -> Any:
+    """A genuine ``crun.CRunMessage`` struct, as the backend pushes it (override fields by IDL name)."""
+    from ._thrift import BUNDLED_IDL_DIR, load_thrift_module
+
+    crun = load_thrift_module(str(BUNDLED_IDL_DIR / "crun.thrift"), (str(BUNDLED_IDL_DIR),))
+    values: dict[str, Any] = {
+        "id": 0,
+        "index": 0,
+        "core": 0,
+        "name": "check",
+        "text": "",
+        "cycle": 0,
+        "repeatCount": 1,
+        "subMessages": [],
+        "callStack": [],
+        "noStop": False,
+        "extraSourceRanges": [],
+        "tooltip": "",
+        "breakAction": crun.CRunBreakAction.kLog,
+    }
+    values.update(fields)
+    return crun.CRunMessage(**values)
+
+
 def _no_callbacks() -> dict[str, Any]:
-    return {"eventhandler": {"ok": True}, "libsupport": {"ok": True}, "frontend": {"ok": True}}
+    return {
+        "eventhandler": {"ok": True},
+        "libsupport": {"ok": True},
+        "frontend": {"ok": True},
+        "crun_display": {"ok": True},
+    }
 
