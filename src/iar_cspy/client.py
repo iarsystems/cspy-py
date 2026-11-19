@@ -24,7 +24,7 @@ from .backend import Backend
 from .breakpoints import Breakpoints
 from .config import Config
 from .context import ContextManager
-from .crun import Crun
+from .crun import CRunMessages, Crun
 from .debugger import Debugger
 from .errors import (
     BackendError,
@@ -113,6 +113,7 @@ class Client:
         self.debugger = Debugger(self)
         self.breakpoints = Breakpoints(self)
         self.crun_rules = Crun(self)
+        self.crun_messages = CRunMessages(self)
         self.context = ContextManager(self)
         self.memory = Memory(self)
         self.disassembly = Disassembly(self)
@@ -136,6 +137,7 @@ class Client:
         self.events.server.stop()
         self.terminal.server.stop()
         self.listwindows.server.stop()
+        self.crun_messages.server.stop()
         if self.owns_backend:
             self.backend.shutdown()
 
@@ -328,15 +330,20 @@ class Client:
         return _thrift.method_names(self.service_class(service))
 
     def ensure_callbacks(self) -> dict[str, Any]:
-        """Register the event handler and libsupport services (done by configure/start)."""
+        """Register the event handler, libsupport and C-RUN display services (done by configure/start)."""
         with self._callbacks_lock:
-            return {"eventhandler": self.events.ensure_registered(), "libsupport": self.terminal.ensure_registered()}
+            return {
+                "eventhandler": self.events.ensure_registered(),
+                "libsupport": self.terminal.ensure_registered(),
+                "crun_display": self.crun_messages.ensure_registered(),
+            }
 
     def clear_session_caches(self) -> None:
         """Forget per-session state that goes stale across reconfigure/stop."""
         self.listwindows.forget_connections()
         self.terminal.forget_exit_code()
         self.breakpoints.forget_driver()
+        self.crun_messages.clear()
 
     def capabilities(self) -> dict[str, Any]:
         """What the backend offers right now; never raises.
