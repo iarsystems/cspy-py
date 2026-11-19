@@ -54,3 +54,30 @@ tracks the tool-surface items; the numbers are kept from there.
   dialogs). A stand-in hosted like the event handler would likely unblock them,
   but it has to answer the backend's prompts on the user's behalf, so decide
   on a policy first (e.g. default answer + log every prompt).
+
+23. [ ] Fix register reads (`client.debugger.registers()`)
+- The CSpyMemory interface has historically been very picky about reading SFR
+  and other non-regular memory spaces. This has struck e.g. reading multiple
+  registers. After the fixes in version 1.1 of the interface (MR !2411,
+  IDE-8591-BB-remote-read-sfr-units) this has been fixed. One can now read a
+  whole block of registers in one call.
+- Verified 2026-11-19 on an Arm (Cortex-M) target, with the !2411 changes: the CPU registers are zone 4,
+  one 32-bit unit per address (R0..R12 = 0..12, R14 = 14, PC = 15, ... 0..29,
+  contiguous). One `readMemory(zone4@0, wordsize=4, bitsize=32, count=30)`
+  returns the same 29 values as 29 separate `count=1` reads (0 mismatches).
+  `registers()` still reads each register as `readMemory(loc, wordsize=1,
+  bitsize=8, count=bytes)`, i.e. four 8-bit units starting at the register's
+  address, which spans the neighbouring registers' addresses. A burst of those
+  preceded an iaride crash (reading many registers at once); not confirmed as
+  the cause.
+- Fix: read each register as `wordsize=bit_size/8, bitsize=bit_size, count=1`,
+  and read contiguous register addresses of a zone as one block instead of one
+  call per register. Give `registers()` a default `limit` while at it.
+- Backwards compatibility: this is a silent improvement in the backend's Thrift
+  implementation (nothing in the IDL changed), so older backends may still
+  expect, or only work with, the byte-unit read. Select the read style by the
+  backend's API version rather than guessing from errors. `CSpyMemory` has
+  `GetServiceVersion()` (memory.thrift); the block read needs version 1.1 or
+  later. Nothing in `iar_cspy` uses it yet, and the vendored `memory.thrift`
+  still says 1.0 (`CSPYMEMORY_VERSION`), so refresh it from `ew/ew` too. Keep
+  the old byte-unit path for older versions.
