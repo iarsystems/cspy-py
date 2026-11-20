@@ -164,8 +164,8 @@ def test_standalone_backend_never_starts_processes():
     backend.stop_debugger()  # a no-op outside managed mode
 
 
-def test_standalone_backend_without_registry_has_no_endpoint():
-    assert Backend(Config(mode="standalone")).registry_endpoint() is None
+def test_standalone_backend_without_registry_has_no_endpoint(tmp_path):
+    assert Backend(Config(mode="standalone", auto_discovery_dir=tmp_path)).registry_endpoint() is None
 
 
 def test_managed_backend_without_executables_explains_iar_path():
@@ -281,8 +281,8 @@ def test_ensure_without_service_manager_explains_cspyserver_limitation(ide):
     assert loaded(rpc) == []
 
 
-def test_ensure_without_registry_explains_options():
-    client, _ = fake_client(Config(mode="standalone"))
+def test_ensure_without_registry_explains_options(tmp_path):
+    client, _ = fake_client(Config(mode="standalone", auto_discovery_dir=tmp_path))
     with pytest.raises(CSpyError, match="no service registry"):
         client.ide_services.ensure("options")
 

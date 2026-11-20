@@ -25,7 +25,15 @@ class ServiceRegistry:
     def _call(self, method: str, *args: Any, registry: tuple[str, int] | None = None) -> Any:
         host, port = self._endpoint(registry)
         service_cls = self._client.idl.registry.CSpyServiceRegistry
-        return self._client.invoke_at(service_cls, host, port, "registry", method, *args)
+        try:
+            return self._client.invoke_at(service_cls, host, port, "registry", method, *args)
+        except CSpyError:
+            # A cached discovered endpoint (registry_endpoint()'s "find" step)
+            # can be stale even when callers resolve services directly through
+            # here instead of Client.endpoint() - forget it uniformly so the
+            # next call rediscovers (see TODO.md #22).
+            self._client.backend.forget_registry()
+            raise
 
     def services(self, name_filter: str = "") -> list[dict[str, Any]]:
         """Registered services, sorted by name; ``name_filter`` is a substring match.
