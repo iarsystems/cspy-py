@@ -33,7 +33,17 @@ from typing import Any, Callable
 from .registry_uri import parse_registry_uri
 
 def _default_local_running_state_folder() -> Path:
-    """Mirrors the IDE's own ``WuFileHelpers::GetLocalRunningStateFolder()``."""
+    """Mirrors the IDE's own ``If::GetSettingsDirectory()`` (``IfxSettingsLocation.cpp``).
+
+    ``IAR_SETTINGS_DIR``, read verbatim (relative or absolute), overrides the
+    settings directory on every platform, and always gets an ``IAR Embedded
+    Workbench`` subfolder then - unlike the unset Linux default, which has
+    none. Set it in both the IDE and here to isolate a test from the user's
+    real settings and from other IDE instances.
+    """
+    settings_dir = os.environ.get("IAR_SETTINGS_DIR")
+    if settings_dir:
+        return Path(settings_dir) / "IAR Embedded Workbench"
     if os.name == "nt":
         local_app_data = os.environ.get("LOCALAPPDATA")
         base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
