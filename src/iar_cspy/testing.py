@@ -19,6 +19,15 @@ the client's real error conversion: a :func:`cspy_exception` surfaces as a
 :class:`~iar_cspy.BackendError`, and a :func:`project_manager_error` as a
 :class:`~iar_cspy.BusyError` (or plain :class:`~iar_cspy.CSpyError` for a
 non-busy ``errorType``), as they would from a backend.
+
+To simulate the backend prompting the headless frontend, call the service
+object from a response; the prompt is attached to the error the RPC raises::
+
+    def fails_after_asking():
+        client.frontend.service.messageBox("Overwrite?", "Flash", 1, 2, "")
+        raise cspy_exception()
+
+    rpc.on("debugger", "startSMPSession", fails_after_asking)
 """
 
 from __future__ import annotations
@@ -90,6 +99,7 @@ class FakeRpc:
         response = self.responses.get((service, method), _MISSING)
         if response is _MISSING:
             raise AssertionError(f"Unexpected RPC {service}.{method}{args!r}")
+        mark = self.client.frontend.mark() if self.client is not None else 0
         try:
             if isinstance(response, BaseException):
                 raise response
@@ -97,14 +107,17 @@ class FakeRpc:
                 kwargs.pop("timeout_ms", None)
                 return response(*args, **kwargs)
             return response
-        except CSpyError:
+        except CSpyError as exc:
+            if self.client is not None:
+                self.client.frontend.annotate(exc, mark)
             raise
         except AssertionError:
             raise
         except Exception as exc:  # noqa: BLE001 - converted as Client.call would
             if self.client is None:
                 raise
-            raise self.client._convert_error(service, method, exc, 0.0) from exc
+            error = self.client._convert_error(service, method, exc, 0.0)
+            raise self.client.frontend.annotate(error, mark) from exc
 
     def methods(self, service: str | None = None) -> list[str]:
         """Names of the methods called so far, in order."""
@@ -189,5 +202,5 @@ def project_manager_error(
 
 
 def _no_callbacks() -> dict[str, Any]:
-    return {"eventhandler": {"ok": True}, "libsupport": {"ok": True}}
+    return {"eventhandler": {"ok": True}, "libsupport": {"ok": True}, "frontend": {"ok": True}}
 

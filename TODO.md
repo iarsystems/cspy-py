@@ -47,10 +47,9 @@ tracks the tool-surface items; the numbers are kept from there.
   does. Open: the standalone-mode path (a process we must not exit), and
   whether the assertion still occurs (not reproduced with EWARM 10.10).
 
-21. [ ] Host a headless `frontend` service
-- Without an IDE, `getStack`, `getContextInfo`, source lookup and disassembly
-  at the PC fail with "No such service, serviceName=frontend": the backend calls
-  back into the IDE's UI service (`frontend.thrift`: message boxes, file
-  dialogs). A stand-in hosted like the event handler would likely unblock them,
-  but it has to answer the backend's prompts on the user's behalf, so decide
-  on a policy first (e.g. default answer + log every prompt).
+21. [x] Host a headless `frontend` service
+- `client.frontend` (`frontend.py`): registered on configure/start unless
+  another reachable frontend is; declines prompts by default, records them,
+  `answer()` rules and a `handler` override, and attaches a failing call's
+  prompts to its error. Open: show the prompts on successful results in the
+  MCP server (e.g. a `warnings` field).

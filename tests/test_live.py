@@ -120,3 +120,13 @@ def test_project_build_debug_and_options(cspy_client, project_copy):
 
     with cspy_client.options.open() as options:
         assert "<pages>" in (options.category_tree().xml or "")
+
+
+def test_context_and_stack_work_headless(cspy_client, cspy_session):
+    # Both call back into a "frontend" service; without an IDE, ours answers.
+    bp = cspy_client.breakpoints.add("commit_history")
+    cspy_session.go_and_wait(timeout=10)
+    assert "commit_history" in str(cspy_client.context.info().functionName)
+    frames = [str(f.functionName) for f in cspy_client.context.stack(0, 5)]
+    assert "commit_history" in frames[0] and any("main" in name for name in frames[1:])
+    cspy_client.breakpoints.remove(bp.id)
