@@ -102,6 +102,10 @@ also by the MCP server. The others are useful to know when a call fails.
   `CSpyServer2-ServiceRegistry.txt` into their working directory, which fails
   in a read-only installation. *Handled:* managed processes run in a private
   temporary directory.
+- **`CRunDisplay.updateAll` carries no data.** `client.crun_messages` clears
+  that namespace's stored messages and rebuilds them from the `itemAdded`
+  pushes that follow, so it can hold fewer messages than the backend's list
+  until they arrive.
 
 ## Values and formats
 

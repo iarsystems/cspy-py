@@ -36,6 +36,19 @@ class AccessType(IntEnum):
     READ_WRITE = 4
 
 
+class CRunBreakAction(IntEnum):
+    """What happens when a C-RUN runtime-check message matches a rule (``crun.CRunBreakAction``).
+
+    Values match the thrift enum (``kStopAndLog``, ``kLog``, ``kIgnore``)
+    directly; :meth:`~iar_cspy.crun.Crun.set_default_action` accepts this
+    enum, its value, or its name as a string.
+    """
+
+    STOP_AND_LOG = 0
+    LOG = 1
+    IGNORE = 2
+
+
 class CodeBreakpointMode(str, Enum):
     """The kind of code breakpoint to set; each maps to a driver's breakpoint category.
 
@@ -306,3 +319,66 @@ class ProjectDebugResult(_Result):
     launch_configuration: Any = None
     configured: bool = False
     started: bool = False
+
+
+@dataclass
+class CRunMessage(_Result):
+    """One live C-RUN runtime-check message (``crun.CRunMessage``).
+
+    ``sub_messages`` nests as the IDL struct does. ``run_to``,
+    ``user_program_counter``, ``extra_source_ranges`` and ``pc_source_range``
+    are the plain dicts :func:`iar_cspy.to_plain` makes of ``shared.Location``
+    and ``shared.SourceRange``. ``index`` is the message's key within its
+    namespace; see :class:`~iar_cspy.crun.CRunMessages`.
+    """
+
+    id: int
+    index: int
+    core: int
+    name: str
+    text: str
+    cycle: int
+    repeat_count: int
+    sub_messages: list[CRunMessage]
+    call_stack: list[str]
+    no_stop: bool
+    run_to: dict[str, Any] | None
+    user_program_counter: dict[str, Any] | None
+    extra_source_ranges: list[dict[str, Any]]
+    pc_source_range: dict[str, Any] | None
+    tooltip: str
+    break_action: CRunBreakAction
+
+    def to_dict(self) -> dict[str, Any]:
+        # asdict() recurses into sub_messages without calling their to_dict().
+        def convert(message: CRunMessage) -> dict[str, Any]:
+            out = asdict(message)
+            out["break_action"] = message.break_action.name
+            out["sub_messages"] = [convert(sub) for sub in message.sub_messages]
+            return out
+
+        return convert(self)
+
+
+@dataclass
+class CRunEvent(_Result):
+    """One push from the backend's ``CRunDisplay`` service.
+
+    ``kind`` is ``item_added``, ``item_updated``, ``item_removed``,
+    ``update_all`` or ``filters_changed``. ``message`` is set for the first
+    two, ``index`` for those and ``item_removed``; ``update_all`` and
+    ``filters_changed`` concern the whole namespace and carry neither.
+    """
+
+    kind: str
+    namespace: str
+    message: CRunMessage | None = None
+    index: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "namespace": self.namespace,
+            "message": None if self.message is None else self.message.to_dict(),
+            "index": self.index,
+        }
