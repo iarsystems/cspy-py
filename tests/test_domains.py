@@ -11,9 +11,19 @@ from types import SimpleNamespace
 
 import pytest
 
-from iar_cspy import AccessType, BusyError, Context, CSpyError, LaunchConfig, ProjectNotLoaded
+from iar_cspy import (
+    AccessType,
+    BusyError,
+    Context,
+    CSpyError,
+    LaunchConfig,
+    ProjectNotLoaded,
+    UnsupportedMethod,
+    classify,
+)
+from iar_cspy._callbacks import CallbackServer
 from iar_cspy.context import context_ref
-from iar_cspy.testing import project_manager_error
+from iar_cspy.testing import fake_client, project_manager_error
 
 
 # -- breakpoints --------------------------------------------------------------
@@ -309,6 +319,149 @@ def test_list_window_notifications(fake):
     notes, toolbar = client.listwindows.notifications(clear=True)
     assert (notes, toolbar) == ([{"kind": "n"}], [{"kind": "t"}])
     assert client.listwindows.notifications() == ([], [])
+
+
+# -- list windows: the IDE's read-only snapshot implementation ----------------
+
+
+class _FakeSnapshotHandler:
+    """Only what ListWindowSnapshot offers: reaching anything else is an error."""
+
+    def __init__(self, mod):
+        self._mod = mod
+        self.open_windows = ["Trace"]
+        self.available_windows: list[str] = []
+        self.shown: list[tuple[str, bool, bool]] = []
+        self.row_texts = ["row0", "row1"]
+
+    def getOpenWindows(self):
+        return list(self.open_windows)
+
+    def getAvailableWindows(self):
+        return list(self.available_windows)
+
+    def showWindow(self, id, show, focus):
+        self.shown.append((id, show, focus))
+        if id in self.available_windows:
+            self.available_windows.remove(id)
+            self.open_windows.append(id)
+
+    def getDisplayName(self, id):
+        return "Trace"
+
+    def getListSpec(self, id):
+        return self._mod.ListSpec(canClickColumns=True, showGrid=True, showHeader=True, showCheckBoxes=False)
+
+    def getColumnInfo(self, id):
+        return [self._mod.Column(title="PC", width=10, fixed=False, hideSelection=False)]
+
+    def getNumberOfRows(self, id):
+        return len(self.row_texts)
+
+    def getRow(self, id, index):
+        cell = self._mod.Cell(text=self.row_texts[index])
+        return self._mod.Row(cells=[cell], isChecked=False, treeinfo="")
+
+
+@pytest.fixture()
+def snapshot(fake):
+    """(client, handler): a client whose registry offers a real fake snapshot service."""
+    client, _ = fake
+    handler = _FakeSnapshotHandler(client.idl.module("listwindow.thrift"))
+    service_cls = client.idl.service("listwindowsnapshot.thrift", "ListWindowSnapshot")
+    server = CallbackServer("fake-snapshot", handler, client.config.listwindow_client_timeout_ms)
+    host, port = server.ensure(service_cls)
+    client.registry.entries.append(
+        {"name": "listwindow.snapshot", "host": host, "port": port, "protocol": 0, "transport": 0}
+    )
+    try:
+        yield client, handler
+    finally:
+        server.stop()
+
+
+def test_snapshot_window_reads_rows_without_any_sliding_rpc(snapshot):
+    client, handler = snapshot
+    # Resolved case-insensitively, and never sliding: the snapshot interface has no chunks.
+    overview = client.listwindows.window("trace").overview()
+    assert (overview.display_name, overview.is_sliding, overview.row_count) == ("Trace", False, 2)
+    assert overview.chunk_info is None
+
+    rows = client.listwindows.window("Trace").rows(0, 10)
+    # getChunkInfo/navigateToFraction are absent from the handler: reaching them would raise.
+    assert [r["row"]["cells"][0]["text"] for r in rows.rows] == ["row0", "row1"]
+    assert (rows.is_sliding, rows.row_count, rows.chunk_info) == (False, 2, None)
+    assert handler.shown == []
+
+
+def test_snapshot_opens_a_known_window_on_demand(snapshot):
+    client, handler = snapshot
+    handler.available_windows.append("Watch")
+    assert client.listwindows.window("watch").row_count() == 2
+    assert handler.shown == [("Watch", True, False)]
+
+
+def test_snapshot_unknown_window_names_the_open_ones(snapshot):
+    client, _ = snapshot
+    with pytest.raises(CSpyError) as excinfo:
+        client.listwindows.window("Nope").row_count()
+    assert "Nope" in str(excinfo.value) and "Trace" in str(excinfo.value)
+
+
+def test_snapshot_rejects_navigation_as_unsupported(snapshot):
+    client, _ = snapshot
+    with pytest.raises(UnsupportedMethod) as excinfo:
+        client.listwindows.window("Trace").navigate()
+    assert excinfo.value.method == "navigateToFraction"
+    assert classify(excinfo.value)["code"] == "UNSUPPORTED_METHOD"
+
+
+def test_snapshot_rejects_trace_instead_of_misrouting_it(snapshot):
+    client, _ = snapshot
+    with pytest.raises(UnsupportedMethod) as excinfo:
+        client.listwindows.trace("Trace").status()
+    # Not the registry's "Trace listwindow service not found": the reason, not a symptom.
+    assert "snapshot" in str(excinfo.value)
+    assert "not found in registry" not in str(excinfo.value)
+
+
+def test_snapshot_never_starts_the_frontend_callback_server(snapshot):
+    client, _ = snapshot
+    client.listwindows.window("Trace").rows(0, 10)
+    assert client.listwindows.server.started is False
+
+
+def test_services_has_one_shape_whichever_implementation_answers(snapshot):
+    client, handler = snapshot
+    (entry,) = client.listwindows.services()
+    assert entry["name"] == "Trace" and entry["source"] == "snapshot" and entry["open"] is True
+    assert entry["host"] and entry["port"] > 0
+
+    handler.available_windows.append("Watch")
+    assert [(e["name"], e["open"]) for e in client.listwindows.services()] == [("Trace", True), ("Watch", False)]
+    assert [e["name"] for e in client.listwindows.services("Tra")] == ["Trace"]
+    # The default filter is not a substring of snapshot ids, so it must not filter them out.
+    assert [e["name"] for e in client.listwindows.services("listwindow")] == ["Trace", "Watch"]
+
+    direct, _ = fake_client(registry=["listwindow0", "listwindow1"])
+    try:
+        assert [(e["name"], e["source"], e["open"]) for e in direct.listwindows.services()] == [
+            ("listwindow0", "backend", True),
+            ("listwindow1", "backend", True),
+        ]
+        assert direct.listwindows.services()[0].keys() == entry.keys()
+    finally:
+        direct.close()
+
+
+def test_read_only_reports_which_implementation_is_live(snapshot):
+    client, _ = snapshot
+    assert client.listwindows.read_only() is True
+    direct, _ = fake_client()
+    try:
+        assert direct.listwindows.read_only() is False
+    finally:
+        direct.close()
 
 
 # -- events -------------------------------------------------------------------
