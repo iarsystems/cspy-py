@@ -20,6 +20,16 @@ also by the MCP server. The others are useful to know when a call fails.
   extension does (`_legacy_launch.py`). The launch configuration needs
   `driverOptions`, and the installation must be known (`iar_path`, or
   `workbenchPath` in the launch configuration).
+- **Attach depends on the driver.** If the driver can't attach, the
+  session still starts, without an error, but the core may or may not have
+  been interrupted, and may or may not be running. Nothing is downloaded or
+  reset. Whether an attached core is left halted or running is also up to
+  the driver; C-SPY logs a message when it cannot honor
+  `leaveTargetRunning`. (Seen with a J-Link on an STM32H5, EWARM 9.70.4: the
+  core is left halted.) *Handled:* `configure_and_start()` always follows an
+  attach with `go()`, or with the run to `stopOnSymbol`, as the IDE and the
+  VS Code extension do. The backend needs it to get back in sync, whether or
+  not the core actually stopped.
 - **Clients end a session with `Debugger.exit()`, not `stopSession`.**
   cspy.thrift deprecates calling `stopSession` directly: `exit()` stops the
   session itself, and CSpyServer2 then exits (code 0). The VS Code extension

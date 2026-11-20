@@ -426,6 +426,11 @@ class Debugger:
         frontend's job (the IDE and the VS Code adapter do it), so it is done
         here after start. Not reaching it does not fail the start: check
         ``result.ran_to_symbol`` (:meth:`session` does, and raises).
+
+        An attach is always followed by :meth:`go` (or the run to
+        ``stopOnSymbol``), as the VS Code adapter does. Whether attaching
+        halts the core depends on the driver, and the backend needs the
+        ``go`` to get back in sync either way.
         """
         config = LaunchConfig.coerce(launch)
         handoff: dict[str, Any] = {
@@ -483,6 +488,8 @@ class Debugger:
                 result.ran_to_symbol = True
             except Exception as exc:  # noqa: BLE001
                 result.stop_on_symbol_error = str(exc)
+        elif config.get("request") == "attach":
+            self.go()
         self.last_start = result
         return result
 
