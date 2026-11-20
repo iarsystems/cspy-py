@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Union
 
-from ._session import requires_session
+from ._session import requires_started_session
 from .errors import CSpyError
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class Memory:
     def __init__(self, client: Client) -> None:
         self._client = client
 
-    @requires_session
+    @requires_started_session
     def read(
         self, address: Address, count: int = 16, *, zone: int | None = None, wordsize: int = 1, bitsize: int = 8
     ) -> bytes:
@@ -59,7 +59,7 @@ class Memory:
         loc = location(self._client, address, zone)
         return bytes(self._client.call("memory", "readMemory", loc, int(wordsize), int(bitsize), int(count)))
 
-    @requires_session
+    @requires_started_session
     def write(
         self,
         address: Address,

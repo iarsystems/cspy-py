@@ -26,7 +26,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Iterator, Sequence, Union
 
 from . import _drivers
-from ._session import requires_session
+from ._session import requires_started_session
 from ._thrift import to_plain
 from .errors import CSpyError, with_context
 from .types import AccessType, CodeBreakpointMode
@@ -103,15 +103,15 @@ class Breakpoints:
     def _call(self, method: str, *args: Any) -> Any:
         return self._client.call("breakpoints", method, *args)
 
-    @requires_session
+    @requires_started_session
     def all(self) -> list[Any]:
         return self._call("getBreakpoints")
 
-    @requires_session
+    @requires_started_session
     def get(self, bp: BreakpointLike) -> Any:
         return self._call("getBreakpoint", breakpoint_id(bp))
 
-    @requires_session
+    @requires_started_session
     def add(self, ule: str, access: AccessType | int = AccessType.FETCH, *, category: str | None = None) -> Any:
         """Set a breakpoint (or with a data ``access``, a watchpoint) on ``ule``.
 
@@ -179,7 +179,7 @@ class Breakpoints:
         driver = self._session_driver()
         return list(driver.code) if driver else []
 
-    @requires_session
+    @requires_started_session
     def add_code(self, location: Location, mode: CodeBreakpointMode | str | None = None) -> Any:
         """Set a code breakpoint at ``location``: an expression (``main``, ``func+4``), an address or a SourceLocation.
 
@@ -207,7 +207,7 @@ class Breakpoints:
             raise CSpyError(f"The {driver.name} driver does not support {mode.value} breakpoints; it supports: {supported}.")
         return self._set_from_fields(ule, factory(ule), f"a code breakpoint ({mode.value}, {driver.name} driver)")
 
-    @requires_session
+    @requires_started_session
     def add_source(
         self, file: str | Path, line: int, column: int = 1, *, mode: CodeBreakpointMode | str | None = None
     ) -> Any:
@@ -218,7 +218,7 @@ class Breakpoints:
         """
         return self.add_code(SourceLocation(file, line, column), mode)
 
-    @requires_session
+    @requires_started_session
     def add_data(
         self, location: Location, access: AccessType | int = AccessType.READ_WRITE, *, size: int | None = None
     ) -> Any:
@@ -241,7 +241,7 @@ class Breakpoints:
             raise CSpyError(f"The {driver.name} driver does not support data breakpoints.")
         return self._set_from_fields(ule, driver.data(ule, access), f"a data breakpoint ({driver.name} driver)")
 
-    @requires_session
+    @requires_started_session
     def add_log(self, location: Location, message: str) -> Any:
         """Set a log breakpoint: when execution reaches ``location``, log ``message`` and continue.
 
@@ -284,7 +284,7 @@ class Breakpoints:
             except CSpyError:
                 pass  # the session may already be gone
 
-    @requires_session
+    @requires_started_session
     def restore(self, descriptor: str) -> Any:
         """Recreate a breakpoint from a ``descriptor`` taken from :meth:`all`.
 
@@ -304,14 +304,14 @@ class Breakpoints:
                 f"across backend versions. Backend error: {exc}",
             ) from exc
 
-    @requires_session
+    @requires_started_session
     def enable(self, bp: BreakpointLike, enabled: bool = True) -> bool:
         return bool(self._call("enableBreakpoint", breakpoint_id(bp), bool(enabled)))
 
     def disable(self, bp: BreakpointLike) -> bool:
         return self.enable(bp, False)
 
-    @requires_session
+    @requires_started_session
     def remove(self, bp: BreakpointLike) -> bool:
         return bool(self._call("removeBreakpoint", breakpoint_id(bp)))
 
@@ -327,7 +327,7 @@ class Breakpoints:
             names = ", ".join(f"{breakpoint_id(bp)} ({(to_plain(bp) or {}).get('ule', '')})" for bp in kept)
             raise CSpyError(f"The backend did not remove these breakpoints: {names}")
 
-    @requires_session
+    @requires_started_session
     def recently_hit(self) -> list[Any]:
         return self._call("getRecentlyHitBreakpoints")
 

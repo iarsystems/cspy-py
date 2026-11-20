@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ._session import requires_session
+from ._session import requires_started_session
 from .context import ContextLike, context_ref
 from .memory import Address, location
 
@@ -20,7 +20,7 @@ class Disassembly:
     def __init__(self, client: Client) -> None:
         self._client = client
 
-    @requires_session
+    @requires_started_session
     def range(
         self,
         start: Address,
@@ -44,7 +44,7 @@ class SourceLookup:
     def __init__(self, client: Client) -> None:
         self._client = client
 
-    @requires_session
+    @requires_started_session
     def ranges(self, address: Address, *, zone: int | None = None) -> list[Any]:
         """``SourceRange`` structs for the code at ``address``."""
         return self._client.call("sourcelookup", "getSourceRanges", location(self._client, address, zone))
