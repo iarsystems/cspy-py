@@ -325,7 +325,8 @@ A declined prompt is often why a call fails, so an error raised by an RPC
 carries the prompts and messages of that call: `exc.prompts`, a list in its
 message, and `frontend_prompts` in `classify()`. When another frontend (a
 Thrift-enabled `iaride`) is registered, it is left alone, the IDE's user
-answers, and `client.frontend.hosting` is False.
+answers, and `client.frontend.hosting` is False. `THRIFT_AUTO_FRONTEND=0`
+(`Config.auto_frontend`) never hosts it, leaving the backend without one.
 
 ## Tests
 

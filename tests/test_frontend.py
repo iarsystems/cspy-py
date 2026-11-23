@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from thriftpy2.rpc import make_client
+from thriftpy2.thrift import TApplicationException
 
 from iar_cspy import BackendError, CSpyError
 from iar_cspy.errors import classify, with_context
@@ -113,10 +116,18 @@ def test_notices_and_progress(fake, backend_side):
     conn.messageBoxAsync("Flash loader failed", "Error", fe.MsgIcon.kMsgIconStop, "")
     conn.editSourceLocation(fe.shared.SourceLocation(filename="/src/main.c", line=12, col=1, locations=[]), True)
     bar = conn.createProgressBar("Downloading", "Flash", 0, 100, True, False)
-    assert conn.updateProgressBarValue(bar, 40) and client.frontend.progress[bar]["value"] == 40
+    # The return value is "cancelled" (frontend.thrift): never.
+    assert conn.updateProgressBarValue(bar, 40) is False and client.frontend.progress[bar]["value"] == 40
+    assert conn.updateProgressBarMessage(bar, "Verifying") is False
     conn.closeProgressBar(bar)
-    assert not conn.updateProgressBarValue(bar, 50) and client.frontend.progress == {}
-    assert conn.handlesAliasStorage() is False and conn.loadAliases() == {} and conn.getActiveTheme() == {}
+    assert conn.updateProgressBarValue(bar, 50) is False and client.frontend.progress == {}
+    assert conn.handlesAliasStorage() is False and conn.loadAliases() == {}
+    # No theme: a failed call makes the backend stop asking (an empty one is re-requested).
+    with pytest.raises(TApplicationException):
+        conn.getActiveTheme()
+    conn.isAlive()  # the connection is still usable
+    version = conn.GetServiceVersion()
+    assert (version.major, version.minor) == (fe.FRONTEND_VERSION.major, fe.FRONTEND_VERSION.minor)
     assert conn.getCapabilities().supportsEditorHighlight is False
     notices = client.frontend.recent(clear=True)
     assert [(p.kind, p.answered_by) for p in notices] == [("message", None), ("edit_source", None)]
@@ -177,3 +188,34 @@ def test_traced_annotates_converted_errors(fake):
     with pytest.raises(CSpyError) as clean:
         client.traced("debugger", "go", lambda: (_ for _ in ()).throw(ConnectionResetError("reset")))
     assert clean.value.prompts == [] and "answered headless" not in str(clean.value)
+
+
+def test_path_answers_and_empty_alias_answers(fake, backend_side):
+    client, _ = fake
+    conn, _ = backend_side
+    client.frontend.answer(r"Select", Path("/src/main.c"), kind="file_dialog")
+    client.frontend.answer(r"Pick", [Path("/a"), "/b"], kind="directory_dialog")
+    assert conn.openFileDialog("Select main.c", "", "", False, True) == ["/src/main.c"]
+    assert conn.openDirectoryDialog("Pick", True, "/") == ["/a", "/b"]
+    client.frontend.answer(r".", Path("/mapped/util.c"), kind="alias")
+    assert conn.resolveAliasForFile("C:/build/util.c", "") == "/mapped/util.c"
+    # An empty answer would turn alias handling off in the backend: keep the file.
+    client.frontend.answer(r".", "", kind="alias")
+    assert conn.resolveAliasForFile("C:/build/util.c", "/x/util.c") == "/x/util.c"
+    assert client.frontend.prompts[-1].answer == "/x/util.c"
+
+
+def test_progress_bars_do_not_outlive_the_session(fake, backend_side):
+    client, _ = fake
+    conn, _ = backend_side
+    conn.createProgressBar("Downloading", "Flash", 0, 100, True, False)
+    assert client.frontend.progress
+    client.clear_session_caches()
+    assert client.frontend.progress == {}
+
+
+def test_frontend_can_be_left_to_the_ide(fake):
+    client, _ = fake
+    object.__setattr__(client.config, "auto_frontend", False)
+    assert client.frontend.ensure_registered() == {"ok": False, "reason": "auto-frontend-disabled"}
+    assert not client.registry.registered

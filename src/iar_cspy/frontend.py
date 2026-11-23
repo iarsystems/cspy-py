@@ -26,11 +26,14 @@ declined prompt is often the cause.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
 from collections import deque
 from typing import TYPE_CHECKING, Any, Callable
+
+from thriftpy2.thrift import TApplicationException
 
 from ._callbacks import CallbackServer
 from ._process import is_reachable
@@ -152,7 +155,14 @@ class _FrontendHandler:
         # backend drop the file's source ranges (stack, context info, lookup).
         default = suggestedFile or fileName
         prompt = self._fe._prompt("alias", "resolveAliasForFile", "", fileName, details, default)
-        return str(prompt.answer or "")
+        answer = _as_path(prompt.answer)
+        if not answer:
+            # An empty string is not "no answer": CssAliasResolver then treats the
+            # frontend as not handling aliases at all, for the rest of the session.
+            log.warning("frontend: empty alias answer for %r; using %r", fileName, default)
+            answer = default
+        prompt.answer = answer
+        return answer
 
     def invokeDialog(self, id: str, title: str, entries: Any) -> Any:
         mod = self._fe._module()
@@ -217,6 +227,10 @@ class _FrontendHandler:
 
     # -- IDE state the backend may ask for ----------------------------------------
 
+    def GetServiceVersion(self) -> Any:
+        mod = self._fe._module()
+        return mod.shared.ServiceVersion(major=mod.FRONTEND_VERSION.major, minor=mod.FRONTEND_VERSION.minor)
+
     def handlesAliasStorage(self) -> bool:
         return False
 
@@ -224,7 +238,10 @@ class _FrontendHandler:
         return {}
 
     def getActiveTheme(self) -> dict[Any, Any]:
-        return {}
+        # There is no theme to report. CSpyServer2 (HostUtil::GetThemeXColor) treats a
+        # failed call as "themes unsupported", logs that once, and uses its native
+        # colors from then on; an empty answer would be asked for again on every use.
+        raise TApplicationException(TApplicationException.UNKNOWN_METHOD, "getActiveTheme: no theme in a headless frontend")
 
     def getCapabilities(self) -> Any:
         return self._fe._module().shared.Capabilities(supportsEditorHighlight=False)
@@ -233,7 +250,12 @@ class _FrontendHandler:
         # A dialog has a title only: rules match it there, and summaries show it once.
         prompt = self._fe._prompt(kind, method, title, "", details, [])
         answer = prompt.answer
-        paths = [] if answer is None else [str(answer)] if isinstance(answer, str) else [str(p) for p in answer]
+        if answer is None:
+            paths = []
+        elif isinstance(answer, (str, os.PathLike)):
+            paths = [_as_path(answer)]
+        else:
+            paths = [_as_path(p) for p in answer]
         prompt.answer = paths
         return paths
 
@@ -331,10 +353,18 @@ class Frontend:
             error.args = (f"{error}{PROMPTS_HEADER}\n{lines}",)
         return error
 
+    def forget_session(self) -> None:
+        """Open progress bars go stale across reconfigure/stop: the backend that opened them is gone."""
+        with self._lock:
+            self.progress.clear()
+
     # -- registration ------------------------------------------------------------
 
     def ensure_registered(self) -> dict[str, Any]:
         """Host and register ``frontend``, unless a reachable one is registered already."""
+        if not self._client.config.auto_frontend:
+            self.hosting = False
+            return {"ok": False, "reason": "auto-frontend-disabled"}
         if self._client.backend.registry_endpoint() is None:
             self.hosting = False
             return {"ok": False, "reason": "no-registry-port"}
@@ -394,12 +424,18 @@ class Frontend:
             self._recent.append((self._seq, prompt))
 
     def _update_progress(self, bar_id: int, **fields: Any) -> bool:
+        """Update a bar; returns True if it was cancelled (frontend.thrift), which never happens here."""
         with self._lock:
             bar = self.progress.get(bar_id)
             if bar is None:
                 return False
             bar.update(fields)
-        return True  # never cancelled
+        return False
+
+
+def _as_path(value: Any) -> str:
+    """A path answer as the string the backend expects (``str`` or ``pathlib.Path``)."""
+    return "" if value is None else os.fspath(value) if isinstance(value, (str, os.PathLike)) else str(value)
 
 
 def _enum_name(enum_cls: Any, value: int) -> str | None:
