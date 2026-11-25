@@ -27,9 +27,9 @@ from .context import ContextManager
 from .debugger import Debugger
 from .errors import (
     BackendError,
+    BackendUnavailableError,
     BusyError,
     CSpyError,
-    NotConnectedError,
     UnsupportedMethod,
     classify,
     cspy_exception_info,
@@ -177,7 +177,9 @@ class Client:
         if service == "debugger" and not self.backend.registry_configured:
             # The one legitimate direct-endpoint case: no registry at all is configured.
             return self.config.host, self.config.port
-        raise NotConnectedError(f"No service registry available right now for service {self.registry_name(service)!r}")
+        raise self.backend.unavailable(
+            f"No service registry available right now for service {self.registry_name(service)!r}"
+        )
 
     def call(self, service: str, method: str, *args: Any, timeout_ms: int | None = None, **kwargs: Any) -> Any:
         """Invoke ``method`` on a service, e.g. ``client.call("debugger", "go")``.
@@ -195,6 +197,8 @@ class Client:
                 host, port = self.endpoint(service)
             except CSpyError as exc:
                 self.ide_services.invalidate(service)
+                if isinstance(exc, BackendUnavailableError):
+                    raise  # the registry is missing: already explained, not a missing service
                 raise CSpyError(
                     f"Could not resolve the {service} service '{self.registry_name(service)}'. "
                     "It is hosted by IarServiceLauncher or a Thrift-enabled iaride, not by a "

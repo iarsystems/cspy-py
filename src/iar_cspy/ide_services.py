@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .config import Config
-from .errors import CSpyError
+from .errors import CSpyError, error_fields
 from .registry_uri import format_registry_uri
 
 if TYPE_CHECKING:
@@ -351,7 +351,7 @@ class IdeServices:
             registered = [entry["name"] for entry in services]
             data["registry_services"] = services
         except Exception as exc:  # noqa: BLE001
-            data["registry_error"] = str(exc)
+            data.update(error_fields("registry_error", exc))
 
         endpoint = backend.current_registry_endpoint()
         data["registry_uri"] = format_registry_uri(*endpoint) if endpoint else None

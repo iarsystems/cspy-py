@@ -55,6 +55,60 @@ class NotConnectedError(CSpyError):
     """No service registry could be resolved right now (see the message for which recipe was tried)."""
 
 
+#: Why a backend is unavailable (:attr:`BackendUnavailableError.kind`).
+NEVER_FOUND = "never_found"  # no registry configured, or discovery found none alive
+MANAGED_EXITED = "managed_exited"  # the managed backend process stopped answering
+FIXED_UNREACHABLE = "fixed_unreachable"  # a designated registry_uri is not answering
+DISCOVERED_GONE = "discovered_gone"  # a discovered IDE/CSpyServer2 registry is gone
+
+
+class BackendUnavailableError(NotConnectedError):
+    """The service registry cannot be used: none was found, or the one in use is gone.
+
+    Raised instead of a bare transport failure or "no registry available".
+    ``kind`` is one of :data:`NEVER_FOUND`, :data:`MANAGED_EXITED`,
+    :data:`FIXED_UNREACHABLE`, :data:`DISCOVERED_GONE`; ``hint`` is a short
+    description of it and ``reason`` the underlying failure. ``str(exc)`` is
+    the reason, the hint, then any backend output.
+    """
+
+    def __init__(self, reason: str, *, kind: str, hint: str, diagnostics: str = "") -> None:
+        parts = [reason]
+        if hint and hint not in reason:
+            parts.append(hint)
+        if diagnostics and diagnostics not in reason:
+            parts.append(diagnostics)
+        super().__init__("\n".join(parts), diagnostics=diagnostics)
+        self.reason = reason
+        self.kind = kind
+        self.hint = hint
+
+
+def unavailable_hint(kind: str, *, registry_uri: str | None = None, configured: bool = True) -> str:
+    """A short statement of what the ``kind`` of :class:`BackendUnavailableError` means."""
+    if kind == MANAGED_EXITED:
+        return "The managed backend exited; the next call starts a new one (its debug session is lost)."
+    if kind == FIXED_UNREACHABLE:
+        return f"The registry at {registry_uri} is not reachable (not managed by this client)."
+    if kind == DISCOVERED_GONE:
+        return "The discovered registry is gone; the next call discovers again (its debug session is lost)."
+    if not configured:
+        return "No registry configured: set registry_uri, enable auto-discovery, or use managed mode."
+    return "No backend found: start an IAR IDE or CSpyServer2, or set registry_uri."
+
+
+def error_fields(field: str, exc: BaseException) -> dict[str, str]:
+    """``{field: reason}`` for a status snapshot, plus ``_kind`` and ``_hint`` entries when it has them.
+
+    Status methods swallow a failed probe into text instead of raising; this
+    keeps the raw reason and adds the ``kind`` and ``hint`` of a
+    :class:`BackendUnavailableError` as sibling entries.
+    """
+    if isinstance(exc, BackendUnavailableError):
+        return {field: exc.reason, f"{field}_kind": exc.kind, f"{field}_hint": exc.hint}
+    return {field: str(exc)}
+
+
 class UnsupportedMethod(CSpyError):
     """The backend does not implement an RPC: it is from an older IAR product.
 
@@ -117,6 +171,18 @@ ERROR_CODES: list[dict[str, Any]] = [
         "category": "transport",
         "retryable": True,
         "description": "Backend endpoint refused connection.",
+    },
+    {
+        "code": "BACKEND_NOT_FOUND",
+        "category": "discovery",
+        "retryable": False,
+        "description": "No backend registry is configured or could be found.",
+    },
+    {
+        "code": "BACKEND_GONE",
+        "category": "transport",
+        "retryable": True,
+        "description": "The backend registry that was in use is gone; its debug session is lost.",
     },
     {
         "code": "SESSION_NOT_STARTED",
@@ -281,6 +347,8 @@ def with_context(exc: BaseException, message: str) -> CSpyError:
         return SessionError(message, diagnostics=diagnostics)
     if isinstance(exc, UnsupportedMethod):
         return UnsupportedMethod(message, exc.method, diagnostics=diagnostics)
+    if isinstance(exc, BackendUnavailableError):
+        return BackendUnavailableError(message, kind=exc.kind, hint=exc.hint, diagnostics=diagnostics)
     return CSpyError(message, diagnostics=diagnostics)
 
 
@@ -396,6 +464,25 @@ def classify(
         return entry(code="SESSION_NOT_STARTED", category="lifecycle", message=text, retryable=False)
     if isinstance(exc, UnsupportedMethod):
         return entry(code="UNSUPPORTED_METHOD", category="compatibility", message=text, retryable=False)
+    if isinstance(exc, BackendUnavailableError):
+        # `text` carries the hint (and is stripped of diagnostics); report the
+        # reason as the message and the hint as its own field.
+        details = {"kind": exc.kind, "hint": exc.hint}
+        if exc.kind == NEVER_FOUND:
+            return entry(
+                code="BACKEND_NOT_FOUND",
+                category="discovery",
+                message=_without_diagnostics(exc.reason, exc),
+                retryable=False,
+                details=details,
+            )
+        return entry(
+            code="BACKEND_GONE",
+            category="transport",
+            message=_without_diagnostics(exc.reason, exc),
+            retryable=True,
+            details=details,
+        )
     if isinstance(exc, BusyError):
         return entry(
             code="PROJECTMANAGER_BUSY",
@@ -448,7 +535,10 @@ def _summary(exc: BaseException) -> str:
     The output (process ids, log lines) is context, not the failure: a log
     line saying "timeout" must not turn a license error into a TIMEOUT.
     """
-    text = describe(exc)
+    return _without_diagnostics(describe(exc), exc)
+
+
+def _without_diagnostics(text: str, exc: BaseException) -> str:
     diagnostics = getattr(exc, "diagnostics", "") or ""
     if diagnostics:
         text = text.replace(diagnostics, "").strip()

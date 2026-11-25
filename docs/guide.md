@@ -236,8 +236,10 @@ client.debugger.attach()
 ```
 
 If the backend you're attached to later disappears (the IDE closes), the next
-RPC raises `NotConnectedError` too, and the call after that looks for a
-replacement automatically — nothing to do on the caller's part.
+RPC raises `BackendUnavailableError` (a `NotConnectedError`; its `kind` and
+`hint` say what to do, see [connecting.md](connecting.md#when-the-registry-is-missing-or-gone)),
+and the call after that looks for a replacement automatically — nothing to do
+on the caller's part.
 
 ### Anything not wrapped
 

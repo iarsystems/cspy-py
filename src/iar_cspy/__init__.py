@@ -33,6 +33,7 @@ from .debugger import Debugger
 from .discovery import RemoteControlInfo, discover
 from .errors import (
     BackendError,
+    BackendUnavailableError,
     BusyError,
     CSpyError,
     CSpyExceptionInfo,
@@ -82,6 +83,7 @@ __all__ = [
     "AccessType",
     "Backend",
     "BackendError",
+    "BackendUnavailableError",
     "Breakpoints",
     "BuildResult",
     "BusyError",
