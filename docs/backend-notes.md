@@ -92,12 +92,12 @@ also by the MCP server. The others are useful to know when a call fails.
   disassembly at the current location, and `stepOver` with an explicit
   argument fail with `ServiceException: No such service,
   serviceName=frontend`. That service (`frontend.thrift`) is the IDE's UI:
-  message boxes and file dialogs. So this is a limitation of running
-  headless; against a Thrift-enabled `iaride` these calls work. The package
-  leaves the step flag out unless you set it, which avoids the step failure.
-  Hosting a headless `frontend` stand-in (as is done for the event handler)
-  would likely unblock the rest, but it would have to answer the backend's
-  prompts on the user's behalf.
+  message boxes and file dialogs. *Handled:* configure/start registers a
+  headless stand-in (`client.frontend`) unless a reachable frontend is
+  registered already; it answers prompts by declining and records them
+  (see the guide). With the example firmware (EWARM 10.10, CXARM 9.70),
+  getting the stack makes the backend call `resolveAliasForFile` for the
+  debug info's Windows build path, with an empty suggestion.
 - **Registry files.** CSpyServer2 and IarServiceLauncher write
   `CSpyServer2-ServiceRegistry.txt` into their working directory, which fails
   in a read-only installation. *Handled:* managed processes run in a private

@@ -39,6 +39,7 @@ from .errors import (
     project_manager_error_info,
 )
 from .events import Events
+from .frontend import Frontend
 from .ide_services import SERVICE_MANAGER_SERVICE, IdeServices
 from .source import Disassembly, SourceLookup
 from .listwindow import ListWindows
@@ -107,6 +108,7 @@ class Client:
         self.ide_services = IdeServices(self)
         self.events = Events(self)
         self.terminal = Terminal(self)
+        self.frontend = Frontend(self)
         self.listwindows = ListWindows(self)
         self.debugger = Debugger(self)
         self.breakpoints = Breakpoints(self)
@@ -132,6 +134,7 @@ class Client:
         """Stop the callback services, and the backend if this client owns it."""
         self.events.server.stop()
         self.terminal.server.stop()
+        self.frontend.server.stop()
         self.listwindows.server.stop()
         if self.owns_backend:
             self.backend.shutdown()
@@ -252,13 +255,14 @@ class Client:
             log.debug("call %s.%s(%s)", label, method, ", ".join(x for x in (args_preview, kwargs_preview) if x))
 
         start = time.perf_counter()
+        mark = self.frontend.mark()
         try:
             result = fn(*args, **kwargs)
-        except CSpyError:
-            raise
+        except CSpyError as exc:
+            raise self.frontend.annotate(exc, mark)
         except Exception as exc:  # noqa: BLE001
             elapsed_ms = (time.perf_counter() - start) * 1000.0
-            raise self._convert_error(label, method, exc, elapsed_ms) from exc
+            raise self.frontend.annotate(self._convert_error(label, method, exc, elapsed_ms), mark) from exc
 
         if log.isEnabledFor(logging.DEBUG):
             elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -323,15 +327,20 @@ class Client:
         return _thrift.method_names(self.service_class(service))
 
     def ensure_callbacks(self) -> dict[str, Any]:
-        """Register the event handler and libsupport services (done by configure/start)."""
+        """Register the event handler, libsupport and frontend services (done by configure/start)."""
         with self._callbacks_lock:
-            return {"eventhandler": self.events.ensure_registered(), "libsupport": self.terminal.ensure_registered()}
+            return {
+                "eventhandler": self.events.ensure_registered(),
+                "libsupport": self.terminal.ensure_registered(),
+                "frontend": self.frontend.ensure_registered(),
+            }
 
     def clear_session_caches(self) -> None:
         """Forget per-session state that goes stale across reconfigure/stop."""
         self.listwindows.forget_connections()
         self.terminal.forget_exit_code()
         self.breakpoints.forget_driver()
+        self.frontend.forget_session()
 
     def capabilities(self) -> dict[str, Any]:
         """What the backend offers right now; never raises.

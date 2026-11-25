@@ -31,6 +31,9 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 - `breakpoints.py`, `context.py`, `memory.py`, `source.py`, `terminal.py`,
   `events.py`, `listwindow.py`, `project.py`, `options.py`, `ide_services.py`:
   one module per service area.
+- `frontend.py`: the headless stand-in for the IDE's `frontend` service
+  (message boxes, dialogs, alias lookups): declines by default, records
+  every prompt, and attaches a failing call's prompts to its error.
 - `errors.py`: `CSpyError` hierarchy, the stable error codes, `classify()`.
 - `_thrift.py`: IDL loading, JSON-to-struct coercion, `to_plain`. The IDL is in `idl/`.
 - `testing.py`: `fake_client()` / `FakeRpc` test doubles (public, also used
@@ -88,8 +91,9 @@ any of that, `backend.py`/`client.py`/`discovery.py` are the implementation.
 
 Important behavior:
 - The registry endpoint is not the debugger endpoint itself.
-- The event handler and libsupport services are hosted by this process and
-  registered on configure/start.
+- The event handler, libsupport and frontend services are hosted by this
+  process and registered on configure/start. The event handler and frontend
+  are left alone when another reachable one (an IDE's) is registered.
 - One session per CSpyServer2 process: on stop, managed mode has it exit
   (`Debugger.exit()`, not the deprecated `stopSession`) and starts a fresh
   one. A replaced backend ends the session (`Debugger._session_identity()`,
@@ -134,8 +138,6 @@ See `docs/backend-notes.md`. In short:
   (managed mode ends sessions with `Debugger.exit()` instead, as cspy.thrift says).
 - Multicore sessions need `--multicore_nr_of_cores=N` on the CSpyServer2 command
   line too (managed mode adds it).
-- Headless: `ContextManager.getStack`/`getContextInfo` fail with "No such
-  service: frontend" (no IDE frontend).
 - Flash loading and license (`kDcLicenseViolation`) failures during start.
 Failures may be backend lifecycle failures rather than misuse.
 
@@ -159,7 +161,7 @@ confuses pytest's rootdir detection.
   the same.
 - Preserve robust registry/eventhandler behavior across backend restarts.
 - Open items are in `TODO.md` (breakpoint categories on emulators,
-  stopSession crash reporting, a headless frontend service).
+  stopSession crash reporting).
 
 ## Notes for Future Agents
 - Do not assume backend stability; validate with short, focused call sequences.
