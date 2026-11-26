@@ -18,8 +18,8 @@ Drive a debug session from a script or test::
 :func:`launch` starts and supervises the backend from an IAR installation;
 :func:`connect` attaches to one that is already running. Everything hangs off
 the :class:`Client`: ``debugger``, ``breakpoints``, ``context``, ``memory``,
-``disassembly``, ``source``, ``terminal``, ``events``, ``listwindows``,
-``project``, ``options`` and ``ide_services``. ``client.raw("debugger")``
+``disassembly``, ``source``, ``terminal``, ``events``, ``frontend``,
+``listwindows``, ``project``, ``options`` and ``ide_services``. ``client.raw("debugger")``
 reaches any RPC the typed layer does not wrap.
 """
 
@@ -45,6 +45,7 @@ from .errors import (
     classify,
 )
 from .events import Events
+from .frontend import Frontend
 from .launch import LaunchConfig
 from .listwindow import ListWindow, ListWindows, TraceWindow
 from .memory import Memory
@@ -60,6 +61,7 @@ from .types import (
     CodeBreakpointMode,
     Context,
     CoreState,
+    FrontendPrompt,
     ListWindowChunk,
     ListWindowOverview,
     ListWindowRows,
@@ -99,6 +101,8 @@ __all__ = [
     "Debugger",
     "Disassembly",
     "Events",
+    "Frontend",
+    "FrontendPrompt",
     "LaunchConfig",
     "ListWindow",
     "ListWindowChunk",

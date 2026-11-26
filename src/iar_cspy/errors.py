@@ -16,16 +16,24 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 
+#: Starts the list of frontend prompts appended to an error's message.
+PROMPTS_HEADER = "\nThe backend asked the frontend during this call (answered headless):"
+
+
 class CSpyError(RuntimeError):
     """Raised when the package cannot load IDL, reach a service, or complete an RPC.
 
     ``diagnostics`` holds recent output of the managed backend processes when
     the failure looks like a backend fault (crash, reset, timeout), else ``""``.
+    ``prompts`` holds the :class:`~iar_cspy.types.FrontendPrompt` records of
+    what the backend asked the headless frontend during the failing call
+    (message boxes, dialogs), answered on the user's behalf; often the cause.
     """
 
-    def __init__(self, message: str, *, diagnostics: str = "") -> None:
+    def __init__(self, message: str, *, diagnostics: str = "", prompts: list[Any] | None = None) -> None:
         super().__init__(message)
         self.diagnostics = diagnostics
+        self.prompts: list[Any] = list(prompts or [])
 
 
 class BackendError(CSpyError):
@@ -340,16 +348,19 @@ def with_context(exc: BaseException, message: str) -> CSpyError:
     diagnostics = getattr(exc, "diagnostics", "") or ""
     info = cspy_exception_info(exc)
     if info is not None:
-        return BackendError(message, info, diagnostics=diagnostics)
-    if isinstance(exc, BusyError):
-        return BusyError(message, exc.info, diagnostics=diagnostics)
-    if isinstance(exc, SessionError):
-        return SessionError(message, diagnostics=diagnostics)
-    if isinstance(exc, UnsupportedMethod):
-        return UnsupportedMethod(message, exc.method, diagnostics=diagnostics)
-    if isinstance(exc, BackendUnavailableError):
-        return BackendUnavailableError(message, kind=exc.kind, hint=exc.hint, diagnostics=diagnostics)
-    return CSpyError(message, diagnostics=diagnostics)
+        out: CSpyError = BackendError(message, info, diagnostics=diagnostics)
+    elif isinstance(exc, BusyError):
+        out = BusyError(message, exc.info, diagnostics=diagnostics)
+    elif isinstance(exc, SessionError):
+        out = SessionError(message, diagnostics=diagnostics)
+    elif isinstance(exc, UnsupportedMethod):
+        out = UnsupportedMethod(message, exc.method, diagnostics=diagnostics)
+    elif isinstance(exc, BackendUnavailableError):
+        out = BackendUnavailableError(message, kind=exc.kind, hint=exc.hint, diagnostics=diagnostics)
+    else:
+        out = CSpyError(message, diagnostics=diagnostics)
+    out.prompts = list(getattr(exc, "prompts", None) or [])
+    return out
 
 
 def describe(exc: BaseException) -> str:
@@ -455,9 +466,13 @@ def classify(
     if diagnostics is not None and looks_like_backend_fault(text):
         extra = {key: value for key, value in diagnostics().items() if value}
 
+    prompts = getattr(exc, "prompts", None) or []
+
     def entry(**kwargs: Any) -> dict[str, Any]:
         out = error_entry(**kwargs)
         out.update(extra)
+        if prompts:
+            out["frontend_prompts"] = [p.to_dict() for p in prompts]
         return out
 
     if isinstance(exc, SessionError) or "requires an active debug session" in low:
@@ -542,4 +557,7 @@ def _without_diagnostics(text: str, exc: BaseException) -> str:
     diagnostics = getattr(exc, "diagnostics", "") or ""
     if diagnostics:
         text = text.replace(diagnostics, "").strip()
+    if getattr(exc, "prompts", None):
+        # Prompt texts are context too: "timeout" in a message box is not a TIMEOUT.
+        text = text.split(PROMPTS_HEADER, 1)[0].strip()
     return text

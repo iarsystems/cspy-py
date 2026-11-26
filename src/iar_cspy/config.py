@@ -129,9 +129,11 @@ class Config:
     # Callback services this process registers with the backend.
     auto_eventhandler: bool = True
     auto_libsupport: bool = True
+    auto_frontend: bool = True
     eventhandler_client_timeout_ms: int = 3600000
     libsupport_client_timeout_ms: int = 3600000
     listwindow_client_timeout_ms: int = 3600000
+    frontend_client_timeout_ms: int = 3600000
 
     def __post_init__(self) -> None:
         set_ = lambda name, value: object.__setattr__(self, name, value)  # noqa: E731
@@ -236,9 +238,11 @@ class Config:
             "options_service_name": get("THRIFT_OPTIONSSERVICE_SERVICE_NAME", "com.iar.optionsservice"),
             "auto_eventhandler": get_bool("THRIFT_AUTO_EVENTHANDLER", True),
             "auto_libsupport": get_bool("THRIFT_AUTO_LIBSUPPORT", True),
+            "auto_frontend": get_bool("THRIFT_AUTO_FRONTEND", True),
             "eventhandler_client_timeout_ms": get_int("THRIFT_EVENTHANDLER_CLIENT_TIMEOUT_MS", 3600000),
             "libsupport_client_timeout_ms": get_int("THRIFT_LIBSUPPORT_CLIENT_TIMEOUT_MS", 3600000),
             "listwindow_client_timeout_ms": get_int("THRIFT_LISTWINDOW_CLIENT_TIMEOUT_MS", 3600000),
+            "frontend_client_timeout_ms": get_int("THRIFT_FRONTEND_CLIENT_TIMEOUT_MS", 3600000),
         }
         unknown = set(overrides) - {f.name for f in fields(cls)}
         if unknown:

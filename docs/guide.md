@@ -79,16 +79,14 @@ with client.debugger.session("launch.json") as dbg:
         print(name, "=", dbg.eval(name).value)       # the value as C-SPY shows it
     print("len =", dbg.eval_int("len"))              # as a Python int
 
-    info = client.context.info()              # needs an IDE frontend, see below
+    info = client.context.info()
     for frame in client.context.stack(0, 10):
         print(" ", frame.functionName)
 ```
 
 The call stack, context info, source lookup and disassembly make the backend
-call back into the IDE's `frontend` service. Headless, with no IDE, they fail
-with `No such service, serviceName=frontend` (see
-[backend-notes.md](backend-notes.md)); against a Thrift-enabled `iaride`
-they work.
+call back into the IDE's `frontend` service. Without an IDE, the package
+hosts a headless one; see [Prompts from the backend](#prompts-from-the-backend).
 
 ### Capture state on a fault
 
@@ -285,6 +283,52 @@ except cspy.BusyError as exc:
     time.sleep(1)
     client.project.build()
 ```
+
+## Prompts from the backend
+
+The backend asks the IDE's UI (the `frontend` service) for message boxes,
+file dialogs, progress bars and source paths. When no IDE has registered one,
+configure/start registers `client.frontend`, a headless stand-in that
+answers for the user, declining what it can:
+
+| Prompt | Answered with |
+|---|---|
+| message box | Ok if that is the only button, else Cancel/No |
+| file, save and directory dialogs | cancelled (no path) |
+| element selection, generic dialog | cancelled |
+| source alias (`resolveAliasForFile`) | the backend's suggested file, else the original name |
+
+Every prompt is recorded, with how it was answered, and so are notices
+such as asynchronous messages and "show this source location" requests:
+
+```python
+for prompt in client.frontend.recent(clear=True):
+    print(prompt.summary())    # message_box: 'Flash / Erase?' -> 'no' (default)
+```
+
+To answer differently, add rules (a regex on the message or title; the most
+recent match wins), or a handler that sees every prompt first and returns
+None to fall through:
+
+```python
+client.frontend.answer(r"Erase", "yes")                                   # message boxes
+client.frontend.answer(r"main\.c", "/src/main.c", kind="file_dialog")
+client.frontend.answer(r".", "/src/app.c", kind="alias")
+
+def map_build_paths(prompt):                    # Windows build paths -> this checkout
+    if prompt.kind == "alias":
+        return "/src/" + prompt.details["file"].replace("\\", "/").rsplit("/", 1)[-1]
+    return None                                 # everything else: rules, then defaults
+
+client.frontend.handler = map_build_paths
+```
+
+A declined prompt is often why a call fails, so an error raised by an RPC
+carries the prompts and messages of that call: `exc.prompts`, a list in its
+message, and `frontend_prompts` in `classify()`. When another frontend (a
+Thrift-enabled `iaride`) is registered, it is left alone, the IDE's user
+answers, and `client.frontend.hosting` is False. `THRIFT_AUTO_FRONTEND=0`
+(`Config.auto_frontend`) never hosts it, leaving the backend without one.
 
 ## Tests
 
