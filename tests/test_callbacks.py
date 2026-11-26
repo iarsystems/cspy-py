@@ -6,6 +6,7 @@ from thriftpy2.rpc import make_client
 
 from iar_cspy import Config
 from iar_cspy._process import is_reachable
+from iar_cspy.crun import CRUN_DISPLAY_SERVICE
 from iar_cspy.events import EVENTHANDLER_SERVICE
 from iar_cspy.terminal import LIBSUPPORT_SERVICE
 
@@ -54,6 +55,58 @@ def test_eventhandler_is_registered_once_and_again_after_a_restart(fake):
     events.server.stop()
 
 
+def test_crun_display_is_registered_once_and_again_after_a_restart(fake):
+    client, _ = fake
+    messages = client.crun_messages
+    first = messages.ensure_registered()
+    assert first["status"] == "registered" and messages.receiving
+    assert client.registry.registered[-1] == (CRUN_DISPLAY_SERVICE, first["host"], first["port"])
+
+    client.registry.entries.append({"name": CRUN_DISPLAY_SERVICE, "host": first["host"], "port": first["port"]})
+    again = messages.ensure_registered()
+    assert again["status"] == "already-registered" and messages.receiving
+    assert len(client.registry.registered) == 1
+
+    client.registry.set([])
+    assert messages.ensure_registered()["status"] == "registered"
+    assert len(client.registry.registered) == 2
+    messages.server.stop()
+
+
+def test_a_foreign_crun_display_is_kept_but_not_received_from(fake):
+    client, _ = fake
+    other = client.listwindows.server  # any reachable server stands in for an IDE's C-RUN window
+    host, port = other.ensure(client.idl.service("listwindow.thrift", "ListWindowFrontend"))
+    client.registry.entries.append({"name": CRUN_DISPLAY_SERVICE, "host": host, "port": port})
+    assert client.crun_messages.ensure_registered()["status"] == "already-registered"
+    assert client.crun_messages.receiving is False
+    other.stop()
+
+
+def test_crun_messages_reach_the_store_through_the_real_service(fake):
+    from iar_cspy.testing import crun_message
+
+    client, _ = fake
+    service = client.idl.service("crun.thrift", "CRunDisplay")
+    host, port = client.crun_messages.server.ensure(service)
+    backend_side = make_client(service, host, port, timeout=2000)
+    try:
+        backend_side.itemAdded(crun_message(index=0, name="AssertFailure", text="boom"), "ns")
+        backend_side.itemAdded(crun_message(index=1, name="Other"), "ns")
+        backend_side.itemRemoved(1, "ns")
+        backend_side.filtersChanged("ns")
+    finally:
+        backend_side.close()
+    assert [(m.name, m.text) for m in client.crun_messages.messages("ns")] == [("AssertFailure", "boom")]
+    assert [kind for kind, _ in client.crun_messages.recent()] == [
+        "item_added",
+        "item_added",
+        "item_removed",
+        "filters_changed",
+    ]
+    client.crun_messages.server.stop()
+
+
 def test_a_foreign_eventhandler_is_kept_but_not_received_from(fake):
     client, _ = fake
     other = client.listwindows.server  # any reachable server stands in for an IDE's handler
@@ -95,5 +148,8 @@ def test_registration_needs_a_registry(tmp_path):
     client, _ = fake_client(Config(mode="standalone", auto_discovery_dir=tmp_path))
     assert client.events.ensure_registered() == {"ok": False, "reason": "no-registry-port"}
     assert client.terminal.ensure_registered() == {"ok": False, "reason": "no-registry-port"}
+    assert client.crun_messages.ensure_registered() == {"ok": False, "reason": "no-registry-port"}
     disabled, _ = fake_client(Config(mode="standalone", registry_uri="thrift://127.0.0.1:1", auto_eventhandler=False))
     assert disabled.events.ensure_registered()["reason"] == "auto-eventhandler-disabled"
+    no_display, _ = fake_client(Config(mode="standalone", registry_uri="thrift://127.0.0.1:1", auto_crun_display=False))
+    assert no_display.crun_messages.ensure_registered()["reason"] == "auto-crun-display-disabled"

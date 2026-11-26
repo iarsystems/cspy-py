@@ -24,6 +24,7 @@ from .backend import Backend
 from .breakpoints import Breakpoints
 from .config import Config
 from .context import ContextManager
+from .crun import CRunMessages, Crun
 from .debugger import Debugger
 from .errors import (
     BackendError,
@@ -57,6 +58,7 @@ SERVICES: dict[str, tuple[str | None, str]] = {
     "debugger": (None, "Debugger"),
     "contextmanager": (None, "ContextManager"),
     "breakpoints": ("breakpoints.thrift", "Breakpoints"),
+    "crun": ("crun.thrift", "CRunBackend"),
     "memory": ("memory.thrift", "CSpyMemory"),
     "disassembly": ("disassembly.thrift", "Disassembly"),
     "sourcelookup": ("sourcelookup.thrift", "SourceLookup"),
@@ -70,7 +72,7 @@ SERVICES: dict[str, tuple[str | None, str]] = {
 _IDE_SERVICE_KEYS = {"projectmanager", "options"}
 
 #: Services whose state lives in the debug session of one CSpyServer2 process.
-_SESSION_SERVICE_KEYS = {"debugger", "contextmanager", "breakpoints", "memory", "disassembly", "sourcelookup"}
+_SESSION_SERVICE_KEYS = {"debugger", "contextmanager", "breakpoints", "crun", "memory", "disassembly", "sourcelookup"}
 
 
 def _safe_repr(value: Any, max_len: int = 180) -> str:
@@ -112,6 +114,8 @@ class Client:
         self.listwindows = ListWindows(self)
         self.debugger = Debugger(self)
         self.breakpoints = Breakpoints(self)
+        self.crun_rules = Crun(self)
+        self.crun_messages = CRunMessages(self)
         self.context = ContextManager(self)
         self.memory = Memory(self)
         self.disassembly = Disassembly(self)
@@ -136,6 +140,7 @@ class Client:
         self.terminal.server.stop()
         self.frontend.server.stop()
         self.listwindows.server.stop()
+        self.crun_messages.server.stop()
         if self.owns_backend:
             self.backend.shutdown()
 
@@ -155,6 +160,8 @@ class Client:
             return "debugger.contextmanager"
         if service == "memory":
             return "debugger.memory"
+        if service == "crun":
+            return "crun.backend"
         if service in _IDE_SERVICE_KEYS:
             return self.ide_services.registry_name(service)
         if service == "servicemanager":
@@ -331,12 +338,13 @@ class Client:
         return _thrift.method_names(self.service_class(service))
 
     def ensure_callbacks(self) -> dict[str, Any]:
-        """Register the event handler, libsupport and frontend services (done by configure/start)."""
+        """Register the event handler, libsupport, frontend and C-RUN display services (done by configure/start)."""
         with self._callbacks_lock:
             return {
                 "eventhandler": self.events.ensure_registered(),
                 "libsupport": self.terminal.ensure_registered(),
                 "frontend": self.frontend.ensure_registered(),
+                "crun_display": self.crun_messages.ensure_registered(),
             }
 
     def clear_session_caches(self) -> None:
@@ -345,6 +353,7 @@ class Client:
         self.terminal.forget_exit_code()
         self.breakpoints.forget_driver()
         self.frontend.forget_session()
+        self.crun_messages.clear()
 
     def capabilities(self) -> dict[str, Any]:
         """What the backend offers right now; never raises.

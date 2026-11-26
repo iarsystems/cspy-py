@@ -238,6 +238,12 @@ ERROR_CODES: list[dict[str, Any]] = [
         ),
     },
     {
+        "code": "CRUN_NOT_INITIALIZED",
+        "category": "crun",
+        "retryable": False,
+        "description": "C-RUN is not active for the current session/IDE; detected from the backend's message text.",
+    },
+    {
         "code": "UNKNOWN_ERROR",
         "category": "unknown",
         "retryable": False,
@@ -540,6 +546,10 @@ def classify(
         return entry(code="TRANSPORT_CONNECTION_RESET", category="transport", message=text, retryable=True)
     if "connection refused" in low or "actively refused" in low or "could not connect" in low:
         return entry(code="TRANSPORT_CONNECTION_REFUSED", category="transport", message=text, retryable=True)
+
+    # C-RUN reports through the plain CSpyError message text.
+    if "c-run is not initialized" in low:
+        return entry(code="CRUN_NOT_INITIALIZED", category="crun", message=text, retryable=False)
 
     return entry(code=fallback_code, category="unknown", message=text, retryable=False)
 
