@@ -29,7 +29,15 @@ from thriftpy2.rpc import make_client
 from . import _thrift, discovery
 from ._process import ManagedProcess, is_reachable
 from .config import Config
-from .errors import CSpyError, NotConnectedError
+from .errors import (
+    DISCOVERED_GONE,
+    FIXED_UNREACHABLE,
+    MANAGED_EXITED,
+    NEVER_FOUND,
+    BackendUnavailableError,
+    CSpyError,
+    unavailable_hint,
+)
 from .registry_uri import format_registry_uri, parse_registry_uri
 
 #: How often :meth:`Backend.wait_for_registry` re-checks :meth:`Backend.registry_endpoint`.
@@ -101,6 +109,8 @@ class Backend:
         #: A registry found through remote-control discovery, cached once reachable
         #: (like an explicit registry_uri, it is not re-validated per call).
         self._discovered_endpoint: tuple[str, int] | None = None
+        #: Whether discovery ever found a reachable registry: tells "gone" from "never found".
+        self._ever_discovered = False
         atexit.register(self.shutdown)
 
     @classmethod
@@ -208,9 +218,8 @@ class Backend:
         real listener behind it return None instead of the plain endpoint).
         """
         if not self.registry_configured:
-            raise NotConnectedError(
-                "no registry configured (registry_uri, auto-discovery) and no "
-                "direct debugger endpoint override"
+            raise self.unavailable(
+                "no registry configured (registry_uri, auto-discovery) and no direct debugger endpoint override"
             )
         if self.mode == "managed":
             return self.registry_endpoint()
@@ -227,7 +236,7 @@ class Backend:
                     return endpoint
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise NotConnectedError(f"Timed out after {timeout_s:g}s waiting for a registry")
+                raise self.unavailable(f"Timed out after {timeout_s:g}s waiting for a registry")
             time.sleep(min(poll_interval_s, remaining))
 
     def _discover_registry(self) -> tuple[str, int] | None:
@@ -242,8 +251,30 @@ class Backend:
             endpoint = parse_registry_uri(candidate.registry_uri)
             if is_reachable(*endpoint):
                 self._discovered_endpoint = endpoint
+                self._ever_discovered = True
                 return endpoint
         return None
+
+    def unavailable(
+        self, reason: str, *, reached: bool = False, diagnostics: str = ""
+    ) -> BackendUnavailableError:
+        """The error for a registry that cannot be used, classified by how this backend finds one.
+
+        ``reached`` says a registry endpoint was known and has stopped
+        answering (as opposed to none being found at all). Raise the result
+        ``from`` the underlying failure, if any.
+        """
+        registry_uri = self.config.registry_uri
+        if self.mode == "managed" and reached:
+            kind = MANAGED_EXITED
+        elif self.mode != "managed" and registry_uri is not None:
+            kind = FIXED_UNREACHABLE
+        elif self.mode != "managed" and auto_discovery_opted_in(self.config) and (reached or self._ever_discovered):
+            kind = DISCOVERED_GONE
+        else:
+            kind = NEVER_FOUND
+        hint = unavailable_hint(kind, registry_uri=registry_uri, configured=self.registry_configured)
+        return BackendUnavailableError(reason, kind=kind, hint=hint, diagnostics=diagnostics)
 
     def forget_registry(self) -> None:
         """Drop a cached discovery result, so the next lookup looks again.

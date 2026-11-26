@@ -69,6 +69,33 @@ The call sequence this supports:
 4. Failures become `CSpyError`/`BackendError`, with backend diagnostics
    attached when they look like crashes.
 
+## When the registry is missing or gone
+
+When the *registry* cannot be used, `Backend.unavailable()` raises
+`BackendUnavailableError` instead of a bare transport failure (a
+`NotConnectedError`, so existing `except` clauses still catch it). `kind` says
+which case it is, `hint` describes it briefly, `reason` is the underlying
+failure; `str(exc)` is the reason, the hint, then any backend output.
+
+| `kind` | When |
+|---|---|
+| `never_found` | nothing configured, or discovery found nothing alive (and never did) |
+| `managed_exited` | the managed backend stopped answering; the next call starts a new one |
+| `fixed_unreachable` | a designated `registry_uri` is not answering |
+| `discovered_gone` | a discovered registry went away; the next call discovers again |
+
+`classify()` reports these as `BACKEND_NOT_FOUND` (not retryable) and
+`BACKEND_GONE` (retryable), with `kind` and `hint` in `details`.
+`debugger.status()` and `ide_services.status()` keep their raw
+`*_error` text and add sibling `*_kind` and `*_hint` when the failure is one of these.
+
+Only a *refused or reset* connection to the registry counts as gone: a
+timeout (a slow registry) and a failure of some other service's endpoint
+(for example CSpyServer2 resetting during configure/start, where the
+attached process output is the useful part) are left as they were.
+`never_found` vs `discovered_gone` is `Backend._ever_discovered`: a registry
+dropped after a failed call (`forget_registry`) is "gone", not "never found".
+
 ## Why a designated registry_uri isn't probed in registry_endpoint()
 
 Managed mode and discovery both verify reachability as part of finding an

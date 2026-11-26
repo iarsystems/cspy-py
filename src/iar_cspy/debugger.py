@@ -21,7 +21,17 @@ from ._session import requires_started_session
 from ._thrift import to_plain
 from .backend import MULTICORE_OPTION
 from .context import ContextLike, context_ref
-from .errors import CSpyError, SessionError, UnsupportedMethod, WaitTimeout, cspy_exception_info, describe, error_entry, with_context
+from .errors import (
+    CSpyError,
+    SessionError,
+    UnsupportedMethod,
+    WaitTimeout,
+    cspy_exception_info,
+    describe,
+    error_entry,
+    error_fields,
+    with_context,
+)
 from .events import FATAL_ERROR_NOTES
 from .launch import LaunchConfig
 from .registry_uri import format_registry_uri
@@ -301,7 +311,7 @@ class Debugger:
         try:
             status["backend_online"] = self.is_online()
         except Exception as exc:  # noqa: BLE001
-            status["backend_online_error"] = str(exc)
+            status.update(error_fields("backend_online_error", exc))
 
         if state["started"]:
             try:
@@ -309,7 +319,7 @@ class Debugger:
                 status["core_count"] = count
                 status["core_states"] = [int(self._call("getCoreState", idx)) for idx in range(max(0, count))]
             except Exception as exc:  # noqa: BLE001
-                status["core_state_error"] = str(exc)
+                status.update(error_fields("core_state_error", exc))
         return status
 
     # -- lifecycle -------------------------------------------------------------

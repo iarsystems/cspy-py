@@ -35,6 +35,8 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
   (message boxes, dialogs, alias lookups): declines by default, records
   every prompt, and attaches a failing call's prompts to its error.
 - `errors.py`: `CSpyError` hierarchy, the stable error codes, `classify()`.
+  `BackendUnavailableError` (a `NotConnectedError`) says why a registry is
+  missing/gone and what to do; see [docs/connecting.md](docs/connecting.md).
 - `_thrift.py`: IDL loading, JSON-to-struct coercion, `to_plain`. The IDL is in `idl/`.
 - `testing.py`: `fake_client()` / `FakeRpc` test doubles (public, also used
   by the MCP server's tests). Scripted exceptions go through the real error
