@@ -141,3 +141,24 @@ def test_legacy_configure_needs_the_installation(install):
     launch = {"target": "arm", "program": str(program), "driver": "Simulator", "driverOptions": []}
     with pytest.raises(CSpyError, match="workbenchPath"):
         client.debugger.configure(launch)
+
+
+def test_an_attach_is_followed_by_go(legacy):
+    client, rpc, launch, _ = legacy
+    rpc.on("debugger", "go")
+    client.debugger.configure_and_start({**launch, "request": "attach"})
+    assert rpc.methods()[-1] == "go"
+
+
+def test_an_attach_is_followed_by_go_even_with_stop_on_entry(legacy):
+    client, rpc, launch, _ = legacy
+    rpc.on("debugger", "go")
+    client.debugger.configure_and_start({**launch, "request": "attach", "stopOnEntry": True})
+    assert rpc.methods()[-1] == "go"
+
+
+def test_a_launch_without_a_symbol_is_not_resumed(legacy):
+    client, rpc, launch, _ = legacy
+    rpc.on("debugger", "go")
+    client.debugger.configure_and_start(launch)
+    assert "go" not in rpc.methods()
