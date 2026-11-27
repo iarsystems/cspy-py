@@ -51,10 +51,15 @@ class CRunBreakAction(IntEnum):
 
 
 class LogSeverity(IntEnum):
-    """How serious an IDE log entry is (``logservice.LogSeverity``).
+    """How an IDE log entry is shown (``logservice.LogSeverity``).
 
-    Ordered, so ``entry.severity >= LogSeverity.WARNING`` picks warnings
-    and worse.
+    The values rank how prominently the IDE shows a line, not how bad it
+    is: only ``WARNING`` and ``ERROR`` are problems. ``ALERT`` is urgent
+    text that is shown at once (the build's "Resolving dependencies..."),
+    and ``SUPER`` a line shown above the rest ("Build succeeded", the
+    warning count, find-in-files hits). So ``severity >= WARNING`` also
+    picks those; filter on ``{WARNING, ERROR}`` (``Logs.problems()``,
+    ``severities=PROBLEM_SEVERITIES``) for the problems.
     """
 
     DEBUG = -1
@@ -497,8 +502,8 @@ class LogPage(_Result):
 class LogCategorySummary(_Result):
     """One category in :class:`LogSummary`.
 
-    ``entries`` counts what is stored; ``errors`` (ERROR, ALERT, SUPER) and
-    ``warnings`` count the current session's stored entries. ``last_seq``
+    ``entries`` counts what is stored; ``errors`` (ERROR) and ``warnings``
+    (WARNING) count the current session's stored entries. ``last_seq``
     is the newest stored entry's ``seq``, None when nothing is stored.
     """
 

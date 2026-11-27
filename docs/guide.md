@@ -199,7 +199,7 @@ id: `Log_Build`, `Log_Debug`, `Log_Tool_Output`, `Log_Find_in_Files`, ...
 ```python
 mark = client.logs.mark()
 client.project.build()
-for entry in client.logs.problems("Log_Build", after=mark):   # warnings and worse, with their detail lines
+for entry in client.logs.problems("Log_Build", after=mark):   # warnings and errors, with their detail lines
     print(f"{entry.path}:{entry.line}: {entry.severity.name}: {entry.text}")
 
 print(client.logs.text("Log_Build", session="current"))       # the last build, as the Build window shows it

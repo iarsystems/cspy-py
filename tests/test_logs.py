@@ -10,7 +10,7 @@ from thriftpy2.rpc import make_client
 import re
 
 from iar_cspy import Config, LogEntry, LogPage, LogSeverity
-from iar_cspy.logs import LOG_FORWARDER_KEY, LOGSERVICE_ID
+from iar_cspy.logs import LOG_FORWARDER_KEY, LOGSERVICE_ID, PROBLEM_SEVERITIES
 from iar_cspy.testing import fake_client, log_entry
 
 
@@ -289,6 +289,56 @@ def test_detail_lines_stay_with_their_own_category(fake):
     assert texts(client.logs.entries(min_severity="error")) == ["error", "build detail"]
 
 
+def a_successful_build(client) -> None:
+    # As ProjectManager logs it: ALERT and SUPER are prominent, not problems.
+    post(client, text="Resolving dependencies...", severity=LogSeverity.ALERT)
+    post(client, text="main.c")
+    post(client, text="Warning[Pe177]: variable unused", severity=LogSeverity.WARNING)
+    post(client, text="  at main.c(3)", isSubEntry=True)
+    post(client, text="Error[Li005]: no definition", severity=LogSeverity.ERROR)
+    post(client, text="Build succeeded", severity=LogSeverity.SUPER)
+    post(client, text="Total number of warnings: 1", severity=LogSeverity.SUPER, isSubEntry=True)
+
+
+def test_problems_are_warnings_and_errors_only(fake):
+    client, _ = fake
+    a_successful_build(client)
+    assert texts(client.logs.problems()) == [
+        "Warning[Pe177]: variable unused",
+        "  at main.c(3)",
+        "Error[Li005]: no definition",
+    ]
+
+
+def test_severities_is_an_exact_set_combinable_with_the_others(fake):
+    client, _ = fake
+    a_successful_build(client)
+    page = client.logs.page(severities=PROBLEM_SEVERITIES, limit=1)
+    assert texts(page.entries) == ["Error[Li005]: no definition"] and page.total == 3
+    assert texts(client.logs.entries(severities=["super"])) == ["Build succeeded", "Total number of warnings: 1"]
+    assert texts(client.logs.entries(severities=[LogSeverity.WARNING, "error"], min_severity="error")) == [
+        "Error[Li005]: no definition"
+    ]
+    assert texts(client.logs.entries(severities=PROBLEM_SEVERITIES, match="Li005")) == ["Error[Li005]: no definition"]
+    assert client.logs.entries(severities=[]) == []
+
+
+def test_text_prefixes_only_warnings_and_errors(fake):
+    client, _ = fake
+    a_successful_build(client)
+    assert client.logs.text("Log_Build") == "\n".join(
+        [
+            "Resolving dependencies...",
+            "main.c",
+            "Warning: Warning[Pe177]: variable unused",
+            "    at main.c(3)",
+            "Error: Error[Li005]: no definition",
+            "Build succeeded",
+            "  Total number of warnings: 1",
+        ]
+    )
+
+
 def test_summary_counts_per_category(fake):
     client, _ = fake
     handler = client.logs.server.handler
@@ -303,9 +353,10 @@ def test_summary_counts_per_category(fake):
     assert summary.mark == 7
     build, debug = summary.categories
     assert (build.name, build.open, build.session, build.entries) == ("Log_Build", True, 1, 6)
-    assert (build.errors, build.warnings, build.last_seq) == (3, 1, 6)
+    # ALERT and SUPER are prominent messages, not errors.
+    assert (build.errors, build.warnings, build.last_seq) == (1, 1, 6)
     assert (debug.name, debug.open, debug.entries, debug.errors, debug.last_seq) == ("Log_Debug", False, 1, 0, 7)
-    assert summary.to_dict()["categories"][0]["errors"] == 3
+    assert summary.to_dict()["categories"][0]["errors"] == 1
 
     client.logs.clear()
     assert client.logs.summary().categories[0].last_seq is None

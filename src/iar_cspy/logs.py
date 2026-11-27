@@ -32,7 +32,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal
 
 from ._callbacks import CallbackServer
 from ._process import is_reachable
@@ -52,13 +52,16 @@ LOGSERVICE_ID = "com.iar.thrift.service.logservice"
 #: ``Backend.loaded_manifests`` key for the forwarder loaded into a managed launcher.
 LOG_FORWARDER_KEY = "logforwarder"
 
-#: Prefixes :meth:`Logs.text` gives entries by severity, as the IDE's windows mark them.
+#: Prefixes :meth:`Logs.text` gives the problems: warnings and errors.
 SEVERITY_PREFIXES = {
     LogSeverity.WARNING: "Warning: ",
     LogSeverity.ERROR: "Error: ",
-    LogSeverity.ALERT: "Error: ",
-    LogSeverity.SUPER: "Error: ",
 }
+
+#: The severities that are problems. ALERT and SUPER are not: the IDE uses
+#: them for messages it shows prominently ("Build succeeded", urgent console
+#: text), see :class:`~iar_cspy.LogSeverity`.
+PROBLEM_SEVERITIES = frozenset({LogSeverity.WARNING, LogSeverity.ERROR})
 
 Session = int | Literal["current"] | None
 Severity = LogSeverity | str | int
@@ -118,9 +121,6 @@ def _matcher(match: Match | None) -> Callable[[str], bool] | None:
         return lambda text: match.search(text) is not None
     needle = str(match).casefold()
     return lambda text: needle in text.casefold()
-
-
-_ERRORS = (LogSeverity.ERROR, LogSeverity.ALERT, LogSeverity.SUPER)
 
 
 @dataclass
@@ -209,6 +209,7 @@ class Logs:
         *,
         session: Session = None,
         min_severity: Severity | None = None,
+        severities: Iterable[Severity] | None = None,
         match: Match | None = None,
         after: int | None = None,
         before: int | None = None,
@@ -220,12 +221,14 @@ class Logs:
 
         - ``session``: a session number (see :attr:`LogEntry.session`) or
           ``"current"``, each category's latest.
-        - ``min_severity``: drop less serious entries; a :class:`LogSeverity`,
+        - ``min_severity``: drop entries ranked below it; a :class:`LogSeverity`,
           its name or value.
+        - ``severities``: keep only these severities (an exact set, same
+          forms). :data:`PROBLEM_SEVERITIES` are the warnings and errors.
         - ``match``: on the entry's text; a string is a case-insensitive
           substring, a compiled pattern is ``search``-ed.
 
-        An entry kept by ``min_severity``/``match`` keeps the sub-entries
+        The filters combine. An entry kept by them keeps the sub-entries
         that directly follow it (its detail lines, usually less severe).
 
         Page bounds are ``seq`` positions (:attr:`LogEntry.seq`,
@@ -239,13 +242,18 @@ class Logs:
         With both ``after`` and ``before``, the first ``limit`` between them.
         """
         floor = None if min_severity is None else _severity(min_severity)
+        allowed = None if severities is None else frozenset(_severity(s) for s in severities)
         matches = _matcher(match)
-        filtered = floor is not None or matches is not None
+        filtered = floor is not None or allowed is not None or matches is not None
         if limit is not None and limit < 0:
             raise ValueError(f"limit must be >= 0, not {limit}")
 
         def wanted(entry: LogEntry) -> bool:
-            return (floor is None or entry.severity >= floor) and (matches is None or matches(entry.text))
+            return (
+                (floor is None or entry.severity >= floor)
+                and (allowed is None or entry.severity in allowed)
+                and (matches is None or matches(entry.text))
+            )
 
         with self._lock:
             if category is None:
@@ -294,6 +302,7 @@ class Logs:
         *,
         session: Session = None,
         min_severity: Severity | None = None,
+        severities: Iterable[Severity] | None = None,
         match: Match | None = None,
         after: int | None = None,
         before: int | None = None,
@@ -301,7 +310,14 @@ class Logs:
     ) -> list[LogEntry]:
         """The entries of :meth:`page`, without the counts."""
         return self.page(
-            category, session=session, min_severity=min_severity, match=match, after=after, before=before, limit=limit
+            category,
+            session=session,
+            min_severity=min_severity,
+            severities=severities,
+            match=match,
+            after=after,
+            before=before,
+            limit=limit,
         ).entries
 
     def problems(
@@ -314,11 +330,15 @@ class Logs:
         before: int | None = None,
         limit: int | None = None,
     ) -> list[LogEntry]:
-        """Warnings and worse with their detail lines, by default of each category's current session."""
+        """Warnings and errors with their detail lines, by default of each category's current session.
+
+        The same as ``entries(..., severities=PROBLEM_SEVERITIES)``; use
+        :meth:`page` with that for the counts.
+        """
         return self.entries(
             category,
             session=session,
-            min_severity=LogSeverity.WARNING,
+            severities=PROBLEM_SEVERITIES,
             match=match,
             after=after,
             before=before,
@@ -331,6 +351,7 @@ class Logs:
         *,
         session: Session = None,
         min_severity: Severity | None = None,
+        severities: Iterable[Severity] | None = None,
         match: Match | None = None,
         after: int | None = None,
         before: int | None = None,
@@ -338,13 +359,20 @@ class Logs:
     ) -> str:
         """The entries :meth:`page` selects, as text, one line per entry.
 
-        Warnings and errors get a ``Warning:``/``Error:`` prefix, sub-entries
+        Warnings and errors get a ``Warning: ``/``Error: `` prefix, sub-entries
         are indented. Without ``category``, each line starts with its
         category in brackets.
         """
         lines = []
         selected = self.entries(
-            category, session=session, min_severity=min_severity, match=match, after=after, before=before, limit=limit
+            category,
+            session=session,
+            min_severity=min_severity,
+            severities=severities,
+            match=match,
+            after=after,
+            before=before,
+            limit=limit,
         )
         for entry in selected:
             prefix = "  " if entry.is_sub_entry else ""
@@ -365,7 +393,7 @@ class Logs:
                         open=stored.open,
                         session=stored.session,
                         entries=len(stored.entries),
-                        errors=sum(1 for entry in current if entry.severity in _ERRORS),
+                        errors=sum(1 for entry in current if entry.severity == LogSeverity.ERROR),
                         warnings=sum(1 for entry in current if entry.severity == LogSeverity.WARNING),
                         last_seq=stored.entries[-1].seq if stored.entries else None,
                     )
