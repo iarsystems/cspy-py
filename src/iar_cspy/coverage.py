@@ -16,6 +16,7 @@ The report comes back as the backend's XML, unchanged::
     </cpMetaDataInfo>
 
 :meth:`CodeCoverage.report` parses it into :class:`~iar_cspy.CoverageReport`.
+Note that this format is informational only, and may change without notice.
 """
 
 from __future__ import annotations
