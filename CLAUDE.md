@@ -28,7 +28,7 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
   variables.
 - `debugger.py`: session lifecycle (configure/start/stop/cleanup/handoff) and
   run control, eval, registers.
-- `breakpoints.py`, `context.py`, `memory.py`, `source.py`, `terminal.py`,
+- `breakpoints.py`, `coverage.py`, `context.py`, `memory.py`, `source.py`, `terminal.py`,
   `events.py`, `listwindow.py`, `project.py`, `options.py`, `ide_services.py`:
   one module per service area.
 - `frontend.py`: the headless stand-in for the IDE's `frontend` service

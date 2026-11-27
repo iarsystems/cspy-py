@@ -18,9 +18,9 @@ Drive a debug session from a script or test::
 :func:`launch` starts and supervises the backend from an IAR installation;
 :func:`connect` attaches to one that is already running. Everything hangs off
 the :class:`Client`: ``debugger``, ``breakpoints``, ``crun_rules``,
-``crun_messages``, ``context``, ``memory``, ``disassembly``, ``source``,
-``terminal``, ``events``, ``frontend``, ``listwindows``, ``project``, ``options``
-and ``ide_services``.
+``crun_messages``, ``coverage``, ``context``, ``memory``, ``disassembly``,
+``source``, ``terminal``, ``events``, ``frontend``, ``listwindows``,
+``project``, ``options`` and ``ide_services``.
 ``client.raw("debugger")`` reaches any RPC the typed layer does not wrap.
 """
 
@@ -30,6 +30,7 @@ from .breakpoints import Breakpoints, SourceLocation
 from .client import Client, connect, launch
 from .config import Config
 from .context import ContextManager
+from .coverage import CodeCoverage
 from .crun import CRunMessages, Crun
 from .debugger import Debugger
 from .discovery import RemoteControlInfo, discover
@@ -99,6 +100,7 @@ __all__ = [
     "CleanupResult",
     "Client",
     "CodeBreakpointMode",
+    "CodeCoverage",
     "Config",
     "Context",
     "ContextManager",

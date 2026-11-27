@@ -106,6 +106,16 @@ also by the MCP server. The others are useful to know when a call fails.
   that namespace's stored messages and rebuilds them from the `itemAdded`
   pushes that follow, so it can hold fewer messages than the backend's list
   until they arrive.
+- **`CodeCoverage` is per session and optional.** CSpyServer2 registers
+  `codecoverage` after the program is loaded, and only when the driver
+  supports code coverage. `getXMLData` returns `""` until
+  `initializeMetaData` has run. *Handled:* `client.coverage.xml()`
+  initializes first.
+- **`CodeCoverage.enable(true)` returns false when it switches coverage on**
+  from off, yet coverage is on afterwards and counts executions (seen on the
+  EWARM simulator). *Handled:* `client.coverage.enable()`/`disable()` check
+  `isEnabled` instead. The on/off state is saved in the session's `.dnx`
+  settings, so later sessions of the same program start with it.
 
 ## Values and formats
 

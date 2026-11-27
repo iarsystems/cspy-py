@@ -239,6 +239,22 @@ RPC raises `BackendUnavailableError` (a `NotConnectedError`; its `kind` and
 and the call after that looks for a replacement automatically — nothing to do
 on the caller's part.
 
+### Code coverage
+
+```python
+with client.debugger.session("launch.json") as dbg:
+    client.coverage.enable()          # the setting is saved with the session's settings
+    dbg.go_and_wait(timeout=10)
+    report = client.coverage.xml()    # the backend's <cpMetaDataInfo> XML, unparsed
+    client.coverage.reset()           # start counting again from zero
+```
+
+The XML lists the program, its modules, their functions and each function's
+steps, each with `execCount`/`totalCount` and a `<sourceLoc>`. `xml()`
+initializes the coverage data on first use and refreshes it after that.
+Without coverage support in the driver, the calls raise a `CSpyError` saying
+so.
+
 ### Anything not wrapped
 
 ```python
