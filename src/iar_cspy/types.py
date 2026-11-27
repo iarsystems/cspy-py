@@ -410,3 +410,64 @@ class CRunEvent(_Result):
             "message": None if self.message is None else self.message.to_dict(),
             "index": self.index,
         }
+
+
+@dataclass
+class CoverageLocation(_Result):
+    """Where a coverage item is in the source. A function only has a start: its ``end_*`` are None."""
+
+    file: str
+    start_line: int
+    start_col: int
+    end_line: int | None = None
+    end_col: int | None = None
+
+
+@dataclass
+class CoverageStep(_Result):
+    """One step (a statement, or part of one) of a function.
+
+    ``code`` is its source text. ``exec_count``/``total_count`` count the
+    machine-code units the step is made of: 0 executed means it never ran,
+    fewer than all that it ran partly (a branch taken only one way).
+    """
+
+    code: str
+    exec_count: int
+    total_count: int
+    location: CoverageLocation | None
+
+
+@dataclass
+class CoverageFunction(_Result):
+    """A function: ``exec_count`` of its ``total_count`` steps executed fully."""
+
+    name: str
+    exec_count: int
+    total_count: int
+    location: CoverageLocation | None
+    steps: list[CoverageStep] = field(default_factory=list)
+
+
+@dataclass
+class CoverageModule(_Result):
+    """A module (compilation unit) of the program, with its functions."""
+
+    name: str
+    exec_count: int
+    total_count: int
+    functions: list[CoverageFunction] = field(default_factory=list)
+
+
+@dataclass
+class CoverageReport(_Result):
+    """The code coverage of the program (``client.coverage.report()``).
+
+    Above the steps, the counts are of steps, summed up the tree: a module's
+    ``exec_count`` of its functions' ``total_count`` steps executed fully.
+    """
+
+    program: str
+    exec_count: int
+    total_count: int
+    modules: list[CoverageModule] = field(default_factory=list)

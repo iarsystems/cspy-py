@@ -14,14 +14,19 @@ The report comes back as the backend's XML, unchanged::
         </function>
       </module>
     </cpMetaDataInfo>
+
+:meth:`CodeCoverage.report` parses it into :class:`~iar_cspy.CoverageReport`.
 """
 
 from __future__ import annotations
 
+import re
+import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 
 from ._session import requires_started_session
 from .errors import BackendError, BackendUnavailableError, CSpyError, with_context
+from .types import CoverageFunction, CoverageLocation, CoverageModule, CoverageReport, CoverageStep
 
 if TYPE_CHECKING:
     from .client import Client
@@ -143,3 +148,95 @@ class CodeCoverage:
         elif refresh:
             self._call("refreshMetaData")
         return self._call("getXMLData") or ""
+
+    @requires_started_session
+    def report(self, *, refresh: bool = True) -> CoverageReport:
+        """The coverage report, parsed: :meth:`xml` as a :class:`~iar_cspy.CoverageReport`."""
+        return parse_report(self.xml(refresh=refresh))
+
+
+# The backend writes names and file paths into the XML unescaped: a bare "&"
+# or "<" in them would make it ill-formed.
+_BARE_AMPERSAND = re.compile(r"&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)")
+_TEXT_ELEMENT = re.compile(r"<name>(.*?)</name>", re.DOTALL)
+
+
+def _escape_text(match: re.Match[str]) -> str:
+    return "<name>" + match[1].replace("<", "&lt;").replace(">", "&gt;") + "</name>"
+
+
+def parse_report(xml: str) -> CoverageReport:
+    """Parse the backend's ``<cpMetaDataInfo>`` XML (:meth:`CodeCoverage.xml`)."""
+    if not xml.strip():
+        raise CSpyError("The code coverage report is empty: the coverage data is not initialized.")
+    text = _TEXT_ELEMENT.sub(_escape_text, _BARE_AMPERSAND.sub("&amp;", xml))
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as exc:
+        raise CSpyError(f"Could not parse the code coverage report: {exc}") from exc
+    program = root.find("program")
+    return CoverageReport(
+        program=_text(program, "name"),
+        exec_count=_count(program, "execCount"),
+        total_count=_count(program, "totalCount"),
+        modules=[
+            CoverageModule(
+                name=_text(module, "name"),
+                exec_count=_count(module, "execCount"),
+                total_count=_count(module, "totalCount"),
+                functions=[_function(f) for f in module.findall("function")],
+            )
+            for module in root.findall("module")
+        ],
+    )
+
+
+def _function(element: ET.Element) -> CoverageFunction:
+    return CoverageFunction(
+        name=_text(element, "name"),
+        exec_count=_count(element, "execCount"),
+        total_count=_count(element, "totalCount"),
+        location=_location(element.find("sourceLoc")),
+        steps=[
+            CoverageStep(
+                code=_text(step, "name"),
+                exec_count=_count(step, "execCount"),
+                total_count=_count(step, "totalCount"),
+                location=_location(step.find("sourceLoc")),
+            )
+            for step in element.findall("step")
+        ],
+    )
+
+
+def _text(element: ET.Element | None, tag: str) -> str:
+    found = None if element is None else element.find(tag)
+    return (found.text or "") if found is not None else ""
+
+
+def _count(element: ET.Element | None, tag: str) -> int:
+    return _int(_text(element, tag)) or 0
+
+
+def _int(value: str | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return None
+
+
+def _location(element: ET.Element | None) -> CoverageLocation | None:
+    if element is None:
+        return None
+
+    def end(name: str) -> int | None:
+        value = _int(element.get(name))
+        return None if value is None or value < 0 else value  # -1: a function has no end
+
+    return CoverageLocation(
+        file=element.get("file", ""),
+        start_line=_int(element.get("startLine")) or 0,
+        start_col=_int(element.get("startCol")) or 0,
+        end_line=end("endLine"),
+        end_col=end("endCol"),
+    )

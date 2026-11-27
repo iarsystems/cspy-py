@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from iar_cspy import BackendError, CodeCoverage, CSpyError, SessionError
+from iar_cspy import BackendError, CodeCoverage, CoverageLocation, CoverageReport, CSpyError, SessionError
+from iar_cspy.coverage import parse_report
 from iar_cspy.testing import cspy_exception
 
 REPORT = "<?xml version = \"1.0\"?><cpMetaDataInfo><program><name>app</name></program></cpMetaDataInfo>"
@@ -127,3 +128,56 @@ def test_a_backend_error_passes_through(session):
     rpc.on("codecoverage", "initializeMetaData", cspy_exception(method="DkInit", message="nope"))
     with pytest.raises(BackendError, match="nope"):
         client.coverage.initialize()
+
+
+# As CssCodeCoverageHandler::getXMLData writes it: no whitespace, names and files unescaped.
+FULL_REPORT = (
+    "<?xml version = \"1.0\"?><cpMetaDataInfo><program><name>R&D app</name>"
+    "<execCount>3</execCount><totalCount>4</totalCount></program>"
+    "<module><name>main</name><execCount>3</execCount><totalCount>4</totalCount>"
+    "<function><name>main</name><execCount>2</execCount><totalCount>3</totalCount>"
+    "<sourceLoc file='/src/a&b/main.c' startLine = '10' endLine = '-1' startCol = '5' endCol = '-1'/>"
+    "<step><name>x = f(1) &amp;&amp; y</name><execCount>1</execCount><totalCount>1</totalCount>"
+    "<sourceLoc file='/src/a&b/main.c' startLine = '12' endLine = '12' startCol = '3' endCol = '18'/></step>"
+    "<step><name>return 0</name><execCount>0</execCount><totalCount>1</totalCount>"
+    "<sourceLoc file='/src/a&b/main.c' startLine = '13' endLine = '13' startCol = '3' endCol = '11'/></step>"
+    "</function>"
+    "<function><name>f</name><execCount>1</execCount><totalCount>1</totalCount>"
+    "<sourceLoc file='/src/f.c' startLine = '1' endLine = '-1' startCol = '1' endCol = '-1'/></function>"
+    "</module></cpMetaDataInfo>"
+)
+
+
+def test_parse_report_builds_the_tree():
+    report = parse_report(FULL_REPORT)
+    assert (report.program, report.exec_count, report.total_count) == ("R&D app", 3, 4)
+    [module] = report.modules
+    assert (module.name, module.exec_count, module.total_count) == ("main", 3, 4)
+    main, f = module.functions
+    assert main.name == "main" and (main.exec_count, main.total_count) == (2, 3)
+    assert main.location == CoverageLocation("/src/a&b/main.c", 10, 5, None, None)
+    first, second = main.steps
+    assert first.code == "x = f(1) && y"
+    assert first.location == CoverageLocation("/src/a&b/main.c", 12, 3, 12, 18)
+    assert (second.code, second.exec_count, second.total_count) == ("return 0", 0, 1)
+    assert f.steps == []
+
+
+def test_parse_report_to_dict_is_plain():
+    out = parse_report(FULL_REPORT).to_dict()
+    assert out["modules"][0]["functions"][0]["steps"][1]["location"]["end_col"] == 11
+
+
+@pytest.mark.parametrize("bad", ["", "  ", "<cpMetaDataInfo><program>"])
+def test_parse_report_rejects_what_is_not_a_report(bad):
+    with pytest.raises(CSpyError, match="code coverage report"):
+        parse_report(bad)
+
+
+def test_report_parses_the_xml(session):
+    client, rpc = session
+    rpc.on("codecoverage", "isInitialized", True)
+    rpc.on("codecoverage", "refreshMetaData", _void)
+    rpc.on("codecoverage", "getXMLData", FULL_REPORT)
+    report = client.coverage.report()
+    assert isinstance(report, CoverageReport) and report.modules[0].functions[1].name == "f"

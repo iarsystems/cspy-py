@@ -148,6 +148,9 @@ def test_code_coverage_counts_executed_code(cspy_client, cspy_session):
     assert report.startswith("<?xml") and "<cpMetaDataInfo>" in report
     program = re.search(r"<program><name>[^<]*</name><execCount>(\d+)</execCount><totalCount>(\d+)<", report)
     assert program and 0 < int(program[1]) <= int(program[2])
+    parsed = coverage.report(refresh=False)
+    assert (parsed.exec_count, parsed.total_count) == (int(program[1]), int(program[2]))
+    assert any(step.exec_count for m in parsed.modules for f in m.functions for step in f.steps)
 
     coverage.reset()
     assert re.search(r"<program><name>[^<]*</name><execCount>0</execCount>", coverage.xml())
