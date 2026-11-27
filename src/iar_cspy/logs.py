@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal
 from ._callbacks import CallbackServer
 from ._process import is_reachable
 from .errors import CSpyError
+from .events import _field
 from .ide_services import LOG_FORWARDER, resolve_manifest
 from .types import LogCategorySummary, LogEntry, LogPage, LogSeverity, LogSummary
 
@@ -62,6 +63,23 @@ SEVERITY_PREFIXES = {
 #: them for messages it shows prominently ("Build succeeded", urgent console
 #: text), see :class:`~iar_cspy.LogSeverity`.
 PROBLEM_SEVERITIES = frozenset({LogSeverity.WARNING, LogSeverity.ERROR})
+
+#: The category holding the debugger's own log: the log events CSpyServer2
+#: posts to this client's event handler (``client.events``), the Debug Log as
+#: the debugger reports it. Unlike ``Log_Debug``, which only an IDE's
+#: forwarder fills, it has entries whenever this client receives the debug
+#: events, a managed backend included. Each :meth:`Debugger.configure` starts
+#: a new session of it.
+DEBUGGER_LOG = "CSpy_Debug"
+
+#: ``cspy.DkLoggingCategoryConstant`` -> the severity the IDE logs it with.
+DEBUGGER_LOG_SEVERITIES = {
+    0: LogSeverity.USER,
+    1: LogSeverity.INFO,
+    2: LogSeverity.WARNING,
+    3: LogSeverity.ERROR,
+    4: LogSeverity.MINOR_INFO,
+}
 
 Session = int | Literal["current"] | None
 Severity = LogSeverity | str | int
@@ -109,6 +127,44 @@ def _entry_from_thrift(entry: Any, session: int, seq: int) -> LogEntry:
         timestamp=datetime.fromtimestamp(stamp).astimezone() if stamp > 0 else None,
         entry_id=int(getattr(entry, "entryId", 0) or 0),
         is_sub_entry=bool(getattr(entry, "isSubEntry", False)),
+        session=session,
+        seq=seq,
+    )
+
+
+def _event_time(stamp: int) -> datetime | None:
+    """A debugger log event's timestamp; its unit is not documented, so judged by size."""
+    if stamp <= 0:
+        return None
+    for divisor in (1, 1_000, 1_000_000):
+        seconds = stamp / divisor
+        if seconds < 1e11:
+            try:
+                return datetime.fromtimestamp(seconds).astimezone()
+            except (OverflowError, OSError, ValueError):
+                return None
+    return None
+
+
+def _entry_from_log_event(event: Any, session: int, seq: int) -> LogEntry:
+    cat = _field(event, "cat")
+    try:
+        severity = LogSeverity.INFO if cat is None else DEBUGGER_LOG_SEVERITIES.get(int(cat), LogSeverity.INFO)
+    except (TypeError, ValueError):
+        severity = LogSeverity.INFO
+    return LogEntry(
+        category=DEBUGGER_LOG,
+        text=str(_field(event, "text") or ""),
+        severity=severity,
+        sender="debugger",
+        path=None,
+        line=None,
+        column=None,
+        end_line=None,
+        end_column=None,
+        timestamp=_event_time(int(_field(event, "timestamp") or 0)),
+        entry_id=0,
+        is_sub_entry=False,
         session=session,
         seq=seq,
     )
@@ -195,6 +251,8 @@ class Logs:
         self._listening_since: datetime | None = None
         self._forwarder: dict[str, Any] | None = None
         self.server = CallbackServer("logservice", _LogServiceHandler(self), client.config.log_service_client_timeout_ms)
+        # The debugger's own log, whether or not an IDE forwards its logs.
+        self._unsubscribe_events = client.events.subscribe(self._on_debug_event)
 
     # -- reading ------------------------------------------------------------------
 
@@ -523,6 +581,7 @@ class Logs:
 
     def close(self) -> None:
         """Deregister (if the registry is still there) and stop the service."""
+        self._unsubscribe_events()
         endpoint, self._registered_at = self._registered_at, None
         if endpoint is not None and self.service_name is not None and is_reachable(*endpoint, timeout_s=0.5):
             try:
@@ -577,11 +636,25 @@ class Logs:
             self._category(name).session += 1
 
     def _post(self, raw: Any) -> None:
+        self._store(str(getattr(raw, "category", "") or ""), lambda session, seq: _entry_from_thrift(raw, session, seq))
+
+    # -- from the debugger --------------------------------------------------------
+
+    def start_debugger_session(self) -> None:
+        """Start a new session of :data:`DEBUGGER_LOG`; done by :meth:`Debugger.configure`."""
+        self._start_session(DEBUGGER_LOG)
+
+    def _on_debug_event(self, kind: str, event: Any) -> None:
+        if kind == "log":
+            self._store(DEBUGGER_LOG, lambda session, seq: _entry_from_log_event(event, session, seq), open_=True)
+
+    def _store(self, name: str, make: Callable[[int, int], LogEntry], open_: bool = False) -> None:
         with self._posted:
-            name = str(getattr(raw, "category", "") or "")
             stored = self._category(name)
+            if open_:
+                stored.open = True
             self._seq += 1
-            entry = _entry_from_thrift(raw, stored.session, self._seq)
+            entry = make(stored.session, self._seq)
             stored.entries.append(entry)
             self._posted.notify_all()
             listeners = list(self._listeners)

@@ -366,6 +366,8 @@ class Debugger:
         cores = 1
         with self._lock:
             self._fatal_error = None
+        # What the debugger logs from here on belongs to this session.
+        self._client.logs.start_debugger_session()
         try:
             self._client.ensure_callbacks()
             legacy, resolved = resolve()

@@ -219,8 +219,14 @@ early as it can: before its first project or options call, and on
 configure/start (`client.logs.ensure_registered()` does it by hand). The logs
 come from the IDE platform's log forwarder: a Thrift-enabled iaride runs one
 while remote control is on, and a managed backend loads one into its
-IarServiceLauncher when the installation ships it. CSpyServer2 alone has none;
-its debug log is still in `client.events` (`forward_log`).
+IarServiceLauncher when the installation ships it. CSpyServer2 alone has none.
+
+The debugger's own log is there too, as category `CSpy_Debug`
+(`iar_cspy.logs.DEBUGGER_LOG`): the log events CSpyServer2 posts to this
+client, so it fills whenever this client receives the debug events, a managed
+backend included, where the IDE's `Log_Debug` does not exist. Each
+`debugger.configure()` starts a new session of it. With an IDE running the
+session, `Log_Debug` has the same lines and `CSpy_Debug` may have none.
 
 ### Attach to an IDE's session
 

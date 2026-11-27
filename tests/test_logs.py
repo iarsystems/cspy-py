@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import threading
+from types import SimpleNamespace
 
 import pytest
 from thriftpy2.rpc import make_client
@@ -10,7 +12,7 @@ from thriftpy2.rpc import make_client
 import re
 
 from iar_cspy import Config, LogEntry, LogPage, LogSeverity
-from iar_cspy.logs import LOG_FORWARDER_KEY, LOGSERVICE_ID, PROBLEM_SEVERITIES
+from iar_cspy.logs import DEBUGGER_LOG, LOG_FORWARDER_KEY, LOGSERVICE_ID, PROBLEM_SEVERITIES
 from iar_cspy.testing import fake_client, log_entry
 
 
@@ -548,3 +550,69 @@ def test_an_ide_service_call_listens_to_the_logs_before_starting_the_service(mon
         client.call("projectmanager", "GetProjects")
     assert order == ["logs", "projectmanager"]
     client.close()
+
+
+# -- the debugger's own log (CSpy_Debug) ---------------------------------------
+
+
+def debugger_log(client, cat, text, timestamp=0) -> None:
+    client.events.server.handler.postLogEvent(SimpleNamespace(cat=cat, text=text, timestamp=timestamp))
+
+
+def test_debugger_log_events_are_stored_as_cspy_debug(fake):
+    client, _ = fake
+    debugger_log(client, 1, "Download complete.", timestamp=1_795_785_920)
+    debugger_log(client, 2, "Breakpoint has no code")
+    debugger_log(client, 3, "Flash failed")
+    debugger_log(client, 0, "user text")
+    debugger_log(client, 4, "minor")
+
+    entries = client.logs.entries(DEBUGGER_LOG)
+    assert [(e.text, e.severity) for e in entries] == [
+        ("Download complete.", LogSeverity.INFO),
+        ("Breakpoint has no code", LogSeverity.WARNING),
+        ("Flash failed", LogSeverity.ERROR),
+        ("user text", LogSeverity.USER),
+        ("minor", LogSeverity.MINOR_INFO),
+    ]
+    assert entries[0].timestamp is not None and entries[0].timestamp.year == 2026
+    assert entries[1].timestamp is None and entries[0].sender == "debugger"
+    assert DEBUGGER_LOG in client.logs.categories()
+    assert texts(client.logs.problems(DEBUGGER_LOG)) == ["Breakpoint has no code", "Flash failed"]
+    assert client.logs.text(DEBUGGER_LOG, min_severity="WARNING") == "Warning: Breakpoint has no code\nError: Flash failed"
+
+
+def test_debugger_log_works_without_the_log_service():
+    client, _ = fake_client(dataclasses.replace(fake_client()[0].config, auto_log_service=False))
+    try:
+        assert client.logs.ensure_registered()["ok"] is False
+        debugger_log(client, 1, "still here")
+        assert texts(client.logs.entries(DEBUGGER_LOG)) == ["still here"]
+        client.logs.close()
+        debugger_log(client, 1, "after close")
+        assert texts(client.logs.entries(DEBUGGER_LOG)) == ["still here"]
+    finally:
+        client.close()
+
+
+def test_debugger_log_timestamps_in_any_unit(fake):
+    client, _ = fake
+    for stamp in (1_795_785_920, 1_795_785_920_000, 1_795_785_920_000_000):
+        debugger_log(client, 1, "t", timestamp=stamp)
+    years = {e.timestamp.year for e in client.logs.entries(DEBUGGER_LOG)}
+    assert years == {2026}
+
+
+def test_each_configure_starts_a_debugger_log_session(fake):
+    client, rpc = fake
+    rpc.on("debugger", "resolveLaunchConfiguration", {"program": "a.out"})
+    rpc.on("debugger", "configureSession", None)
+    debugger_log(client, 1, "before")
+    client.debugger.configure({"program": "a.out"})
+    debugger_log(client, 1, "first session")
+    client.debugger.configure({"program": "a.out"})
+    debugger_log(client, 1, "second session")
+
+    assert texts(client.logs.entries(DEBUGGER_LOG, session="current")) == ["second session"]
+    assert texts(client.logs.entries(DEBUGGER_LOG, session=1)) == ["first session"]
+    assert [c.session for c in client.logs.summary().categories if c.name == DEBUGGER_LOG] == [2]
