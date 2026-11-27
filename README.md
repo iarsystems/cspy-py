@@ -98,6 +98,7 @@ we recommend using the latest IAR product version for your architecture, if poss
 | `client.disassembly`, `client.source` | `range(start, end)`; `ranges(address)`. |
 | `client.terminal` | The target's console via libsupport: `text`, `output()`, `send(input)`, `wait_for_input_request()`, `wait_for_text("READY")`, `wait_for_exit()`. |
 | `client.events` | Debug events from the backend: `recent()`, `subscribe(fn)`, `forward_log(stream)` (writes the debug log to `stream` from then on). |
+| `client.logs` | The IDE's logs (Build, Debug Log, Tool Output, ...) as posted by its log forwarder, stored from the moment the client starts listening. Categories are the IDE's ids (`Log_Build`, `Log_Debug`, ...): `entries(category, session="current", since=mark, min_severity=...)`, `problems(category)`, `text(category)`, `categories()`, `mark()`, `clear()`, `status()`. |
 | `client.listwindows` | Trace and other list windows: `services()`, `window(name).rows()`, `trace(name).set_enabled()`. |
 | `client.project` | Embedded Workbench projects: `load`, `status`, `build`, `files`, `launch_configuration`, `start_debugging`. |
 | `client.options` | The options dialog model: `open(project, configuration)` returns a session with `category_tree`, `option_tree`, `update`, `commit`. |

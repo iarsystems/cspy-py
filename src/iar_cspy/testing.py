@@ -134,6 +134,7 @@ class FakeRegistry:
     def __init__(self, names: list[str] | None = None) -> None:
         self.entries: list[dict[str, Any]] = []
         self.registered: list[tuple[str, str, int]] = []
+        self.deregistered: list[str] = []
         self.set(names or [])
 
     def set(self, names: list[str]) -> None:
@@ -155,6 +156,10 @@ class FakeRegistry:
 
     def register(self, name: str, host: str, port: int) -> None:
         self.registered.append((name, host, port))
+
+    def deregister(self, name: str, *, registry: tuple[str, int] | None = None) -> None:
+        self.deregistered.append(name)
+        self.entries = [e for e in self.entries if e["name"] != name]
 
 
 def fake_client(
@@ -225,11 +230,41 @@ def crun_message(**fields: Any) -> Any:
     return crun.CRunMessage(**values)
 
 
+def log_entry(**fields: Any) -> Any:
+    """A genuine ``logservice.LogEntry`` struct, as the IDE's log forwarder posts it.
+
+    Override fields by IDL name; ``srcPos``/``srcEndPos`` also take a
+    ``(row, col)`` tuple. Pass it to ``client.logs.server.handler.postLogEntry``.
+    """
+    from ._thrift import BUNDLED_IDL_DIR, load_thrift_module
+
+    mod = load_thrift_module(str(BUNDLED_IDL_DIR / "logservice.thrift"), (str(BUNDLED_IDL_DIR),))
+    values: dict[str, Any] = {
+        "category": "Log_Build",
+        "sender": "",
+        "text": "",
+        "severity": mod.LogSeverity.kInfo,
+        "path": "",
+        "srcPos": mod.SrcPos(row=0, col=0, valid=False),
+        "srcEndPos": mod.SrcPos(row=0, col=0, valid=False),
+        "timestamp": 0,
+        "entryId": 0,
+        "isSubEntry": False,
+    }
+    values.update(fields)
+    for key in ("srcPos", "srcEndPos"):
+        if isinstance(values[key], tuple):
+            row, col = values[key]
+            values[key] = mod.SrcPos(row=row, col=col, valid=True)
+    return mod.LogEntry(**values)
+
+
 def _no_callbacks() -> dict[str, Any]:
     return {
         "eventhandler": {"ok": True},
         "libsupport": {"ok": True},
         "frontend": {"ok": True},
         "crun_display": {"ok": True},
+        "log_service": {"ok": True},
     }
 

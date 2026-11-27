@@ -190,6 +190,29 @@ finally:
 Project and option calls need the IDE services, which a managed backend from a
 full IAR installation provides; see [ide-services.md](ide-services.md).
 
+### Read the IDE's logs
+
+`client.logs` holds what the IDE logged since the client started listening,
+with severities and source positions. Each log is a category with the IDE's
+id: `Log_Build`, `Log_Debug`, `Log_Tool_Output`, `Log_Find_in_Files`, ...
+
+```python
+mark = client.logs.mark()
+client.project.build()
+for entry in client.logs.problems("Log_Build", since=mark):   # warnings and worse
+    print(f"{entry.path}:{entry.line}: {entry.severity.name}: {entry.text}")
+
+print(client.logs.text("Log_Build", session="current"))       # the last build, as the Build window shows it
+```
+
+Past entries are not replayed by the IDE, so the client starts listening as
+early as it can: before its first project or options call, and on
+configure/start (`client.logs.ensure_registered()` does it by hand). The logs
+come from the IDE platform's log forwarder: a Thrift-enabled iaride runs one
+while remote control is on, and a managed backend loads one into its
+IarServiceLauncher when the installation ships it. CSpyServer2 alone has none;
+its debug log is still in `client.events` (`forward_log`).
+
 ### Attach to an IDE's session
 
 ```python

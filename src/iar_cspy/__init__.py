@@ -50,6 +50,7 @@ from .events import Events
 from .frontend import Frontend
 from .launch import LaunchConfig
 from .listwindow import ListWindow, ListWindows, TraceWindow
+from .logs import Logs
 from .memory import Memory
 from .options import Options, OptionsSession, ProjectNotLoaded
 from .project import Project
@@ -70,6 +71,8 @@ from .types import (
     ListWindowChunk,
     ListWindowOverview,
     ListWindowRows,
+    LogEntry,
+    LogSeverity,
     ProjectDebugResult,
     ProjectInfo,
     ProjectStatus,
@@ -119,6 +122,9 @@ __all__ = [
     "ListWindowOverview",
     "ListWindowRows",
     "ListWindows",
+    "LogEntry",
+    "LogSeverity",
+    "Logs",
     "Memory",
     "NotConnectedError",
     "Options",

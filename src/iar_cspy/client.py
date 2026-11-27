@@ -44,6 +44,7 @@ from .frontend import Frontend
 from .ide_services import SERVICE_MANAGER_SERVICE, IdeServices
 from .source import Disassembly, SourceLookup
 from .listwindow import ListWindows
+from .logs import Logs
 from .memory import Memory
 from .options import Options
 from .project import Project
@@ -116,6 +117,7 @@ class Client:
         self.breakpoints = Breakpoints(self)
         self.crun_rules = Crun(self)
         self.crun_messages = CRunMessages(self)
+        self.logs = Logs(self)
         self.context = ContextManager(self)
         self.memory = Memory(self)
         self.disassembly = Disassembly(self)
@@ -141,6 +143,7 @@ class Client:
         self.frontend.server.stop()
         self.listwindows.server.stop()
         self.crun_messages.server.stop()
+        self.logs.close()
         if self.owns_backend:
             self.backend.shutdown()
 
@@ -202,6 +205,9 @@ class Client:
         args, kwargs = _thrift.coerce_call_args(service_cls, method, args, kwargs)
 
         if service in _IDE_SERVICE_KEYS:
+            # Before the service is started or used: the IDE's logs are not
+            # replayed, so listen before anything gets logged.
+            self.logs.auto_ensure()
             self.ide_services.auto_ensure(service)
             try:
                 host, port = self.endpoint(service)
@@ -338,13 +344,17 @@ class Client:
         return _thrift.method_names(self.service_class(service))
 
     def ensure_callbacks(self) -> dict[str, Any]:
-        """Register the event handler, libsupport, frontend and C-RUN display services (done by configure/start)."""
+        """Register the services this process hosts for the backend (done by configure/start).
+
+        The event handler, libsupport, frontend, C-RUN display and the IDE log service.
+        """
         with self._callbacks_lock:
             return {
                 "eventhandler": self.events.ensure_registered(),
                 "libsupport": self.terminal.ensure_registered(),
                 "frontend": self.frontend.ensure_registered(),
                 "crun_display": self.crun_messages.ensure_registered(),
+                "log_service": self.logs.ensure_registered(),
             }
 
     def clear_session_caches(self) -> None:

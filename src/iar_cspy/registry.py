@@ -104,3 +104,7 @@ class ServiceRegistry:
             host=host, port=int(port), protocol=mod.Protocol.Binary, transport=mod.Transport.Socket
         )
         self._call("registerService", name, location)
+
+    def deregister(self, name: str, *, registry: tuple[str, int] | None = None) -> None:
+        """Remove ``name`` from the registry (at ``registry``, default the current one)."""
+        self._call("deregisterService", name, registry=registry)

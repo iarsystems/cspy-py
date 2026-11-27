@@ -81,6 +81,19 @@ IDE_SERVICES: dict[str, dict[str, Any]] = {
 }
 
 
+#: The IDE platform's log forwarder (``ThriftLogForwarder``). Not an IDE
+#: service in the sense above: it registers nothing, it is a *client* of every
+#: ``LogService`` in the registry (see :mod:`iar_cspy.logs`). It has to run in
+#: the process that hosts ProjectManager to see what that logs.
+LOG_FORWARDER: dict[str, Any] = {
+    "manifest": "logforwarder.json",
+    "manifest_service_name": "com.iar.LogService",
+    "library": "ThriftLogForwarder",
+    "start_entry_point": "StartThriftLogForwarder",
+    "stop_entry_point": "StopThriftLogForwarder",
+}
+
+
 def service_dependencies(key: str) -> tuple[str, ...]:
     return tuple(IDE_SERVICES[key].get("depends_on", ()))
 
@@ -167,8 +180,8 @@ def render_manifest(spec: dict[str, Any], bin_dir: Path, manifest_dir: Path) -> 
     )
 
 
-def resolve_manifest(cfg: Config, key: str) -> Path:
-    """Return a manifest path for one IDE service.
+def resolve_manifest(cfg: Config, key: str, spec: dict[str, Any] | None = None) -> Path:
+    """Return a manifest path for one IDE service (or for ``spec``, e.g. :data:`LOG_FORWARDER`).
 
     Prefers the manifest shipped next to the library. Falls back to
     generating an equivalent one in a temp directory, which is needed in
@@ -176,7 +189,7 @@ def resolve_manifest(cfg: Config, key: str) -> Path:
     ...)`` with an empty file list, so ``OptionsService.json`` is absent from
     the installation even though ``libOptionsService.so`` is there.
     """
-    spec = IDE_SERVICES[key]
+    spec = spec if spec is not None else IDE_SERVICES[key]
     bin_dir = service_bin_dir(cfg)
 
     stock = bin_dir / spec["manifest"]

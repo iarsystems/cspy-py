@@ -10,6 +10,7 @@ readable names, context references, and the results of multi-step operations.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from enum import Enum, IntEnum
 from typing import Any
 
@@ -47,6 +48,23 @@ class CRunBreakAction(IntEnum):
     STOP_AND_LOG = 0
     LOG = 1
     IGNORE = 2
+
+
+class LogSeverity(IntEnum):
+    """How serious an IDE log entry is (``logservice.LogSeverity``).
+
+    Ordered, so ``entry.severity >= LogSeverity.WARNING`` picks warnings
+    and worse.
+    """
+
+    DEBUG = -1
+    USER = 0
+    MINOR_INFO = 1
+    INFO = 2
+    WARNING = 3
+    ERROR = 4
+    ALERT = 5
+    SUPER = 6
 
 
 class CodeBreakpointMode(str, Enum):
@@ -410,3 +428,37 @@ class CRunEvent(_Result):
             "message": None if self.message is None else self.message.to_dict(),
             "index": self.index,
         }
+
+
+@dataclass
+class LogEntry(_Result):
+    """One entry of an IDE log (``logservice.LogEntry``), as ``client.logs`` stores it.
+
+    ``category`` is the IDE's id of the log it belongs to (``Log_Build``,
+    ``Log_Debug``, ``Log_Tool_Output``, ...). ``path``, ``line``/``column`` and ``end_line``/``end_column``
+    are None where the IDE gave no source position. ``is_sub_entry`` marks an
+    entry that continues the one before it (the detail lines of a build
+    message); entries stay a flat list in the order they were logged.
+    ``session`` counts the times the IDE restarted this category's log (a new
+    build, say) before the entry arrived: 0 until the first restart.
+    """
+
+    category: str
+    text: str
+    severity: LogSeverity
+    sender: str
+    path: str | None
+    line: int | None
+    column: int | None
+    end_line: int | None
+    end_column: int | None
+    timestamp: datetime | None
+    entry_id: int
+    is_sub_entry: bool
+    session: int
+
+    def to_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        out["severity"] = self.severity.name
+        out["timestamp"] = None if self.timestamp is None else self.timestamp.isoformat()
+        return out
