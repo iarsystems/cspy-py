@@ -106,6 +106,25 @@ also by the MCP server. The others are useful to know when a call fails.
   that namespace's stored messages and rebuilds them from the `itemAdded`
   pushes that follow, so it can hold fewer messages than the backend's list
   until they arrive.
+- **`CodeCoverage` is per session and optional.** CSpyServer2 registers
+  `codecoverage` after the program is loaded, and only when the driver
+  supports code coverage. `getXMLData` returns `""` until
+  `initializeMetaData` has run. *Handled:* `client.coverage.xml()`
+  initializes first.
+- **`CodeCoverage.enable(true)` returns false when it switches coverage on**
+  from off, yet coverage is on afterwards and counts executions (seen on the
+  EWARM simulator). *Handled:* `client.coverage.enable()`/`disable()` check
+  `isEnabled` instead. The on/off state is saved in the session's `.dnx`
+  settings, so later sessions of the same program start with it.
+- **Coverage counts mean different things per level.** Program, module and
+  function `execCount`/`totalCount` count steps, `execCount` being the steps
+  executed fully; a step's own counts are of the machine-code units it is
+  made of, so a step can be partly executed (seen on the EWARM simulator
+  under iaride: 96 + 9 partial + 17 unexecuted steps of 122). Newer backends
+  throw from `getXMLData` before `initializeMetaData` instead of returning
+  `""`. Under iaride, the program `<name>` can be the IDE's current project
+  rather than the debugged one. The XML writes names and file paths
+  unescaped. *Handled:* `parse_report` escapes a bare `&` before parsing.
 
 ## Values and formats
 

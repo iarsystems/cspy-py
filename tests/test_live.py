@@ -5,6 +5,7 @@ Runs the bundled Cortex-M3 simulator firmware by default.
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -130,3 +131,28 @@ def test_context_and_stack_work_headless(cspy_client, cspy_session):
     frames = [str(f.functionName) for f in cspy_client.context.stack(0, 5)]
     assert "commit_history" in frames[0] and any("main" in name for name in frames[1:])
     cspy_client.breakpoints.remove(bp.id)
+
+
+def test_code_coverage_counts_executed_code(cspy_client, cspy_session):
+    coverage = cspy_client.coverage
+    if not coverage.has_metadata_support():
+        pytest.skip("The driver has no code coverage")
+    coverage.enable()
+    assert coverage.is_enabled()
+    coverage.reset()
+    assert re.search(r"<program><name>[^<]*</name><execCount>0</execCount>", coverage.xml())
+
+    cspy_client.breakpoints.add("commit_history")
+    cspy_session.go_and_wait(timeout=10)
+    report = coverage.xml()
+    assert report.startswith("<?xml") and "<cpMetaDataInfo>" in report
+    program = re.search(r"<program><name>[^<]*</name><execCount>(\d+)</execCount><totalCount>(\d+)<", report)
+    assert program and 0 < int(program[1]) <= int(program[2])
+    parsed = coverage.report(refresh=False)
+    assert (parsed.exec_count, parsed.total_count) == (int(program[1]), int(program[2]))
+    assert any(step.exec_count for m in parsed.modules for f in m.functions for step in f.steps)
+
+    coverage.reset()
+    assert re.search(r"<program><name>[^<]*</name><execCount>0</execCount>", coverage.xml())
+    coverage.disable()
+    assert not coverage.is_enabled()
