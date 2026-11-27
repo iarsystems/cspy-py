@@ -7,7 +7,9 @@ import threading
 import pytest
 from thriftpy2.rpc import make_client
 
-from iar_cspy import Config, LogEntry, LogSeverity
+import re
+
+from iar_cspy import Config, LogEntry, LogPage, LogSeverity
 from iar_cspy.logs import LOG_FORWARDER_KEY, LOGSERVICE_ID
 from iar_cspy.testing import fake_client, log_entry
 
@@ -66,12 +68,12 @@ def test_entries_of_all_categories_come_in_arrival_order(fake):
     assert client.logs.entries("Log_Find_in_Files") == []
 
 
-def test_since_a_mark(fake):
+def test_after_a_mark(fake):
     client, _ = fake
     post(client, text="before")
     mark = client.logs.mark()
     post(client, text="after")
-    assert texts(client.logs.entries(since=mark)) == ["after"]
+    assert texts(client.logs.entries(after=mark)) == ["after"]
 
 
 def test_min_severity_takes_the_enum_its_name_or_value(fake):
@@ -172,6 +174,143 @@ def test_each_category_keeps_its_own_maxlen(fake):
     small.server.stop()
 
 
+def test_seq_is_the_stream_position_across_categories(fake):
+    client, _ = fake
+    assert client.logs.mark() == 0
+    post(client, category="Log_Build", text="b")
+    post(client, category="Log_Debug", text="d")
+    assert [e.seq for e in client.logs.entries()] == [1, 2]
+    assert client.logs.entries("Log_Debug")[0].to_dict()["seq"] == 2
+    assert client.logs.mark() == 2
+
+
+def numbered(client, n: int, category: str = "Log_Debug") -> None:
+    for i in range(1, n + 1):
+        post(client, category=category, text=f"line {i}")
+
+
+def test_page_without_bounds_is_the_tail(fake):
+    client, _ = fake
+    numbered(client, 10)
+    page = client.logs.page(limit=3)
+    assert texts(page.entries) == ["line 8", "line 9", "line 10"]
+    assert (page.total, page.before, page.after, page.first_seq, page.last_seq) == (10, 7, 0, 8, 10)
+    assert len(client.logs.page().entries) == 10  # limit=None: all
+
+
+def test_page_after_takes_the_first_limit_after_it(fake):
+    client, _ = fake
+    numbered(client, 10)
+    page = client.logs.page(after=4, limit=3)
+    assert texts(page.entries) == ["line 5", "line 6", "line 7"]
+    assert (page.before, page.after) == (4, 3)
+    nxt = client.logs.page(after=page.last_seq, limit=3)
+    assert texts(nxt.entries) == ["line 8", "line 9", "line 10"] and nxt.after == 0
+
+
+def test_page_before_takes_the_last_limit_before_it_oldest_first(fake):
+    client, _ = fake
+    numbered(client, 10)
+    page = client.logs.page(before=8, limit=3)
+    assert texts(page.entries) == ["line 5", "line 6", "line 7"]
+    assert (page.before, page.after) == (4, 3)
+    older = client.logs.page(before=page.first_seq, limit=10)
+    assert texts(older.entries) == ["line 1", "line 2", "line 3", "line 4"] and older.before == 0
+
+
+def test_page_between_after_and_before(fake):
+    client, _ = fake
+    numbered(client, 10)
+    page = client.logs.page(after=2, before=9, limit=2)
+    assert texts(page.entries) == ["line 3", "line 4"]
+    assert (page.total, page.before, page.after) == (10, 2, 6)
+
+
+def test_page_positions_survive_eviction(fake):
+    client, _ = fake
+    small = type(client.logs)(client, maxlen=5)
+    for i in range(1, 9):
+        small._post(log_entry(category="Log_Debug", text=f"line {i}"))
+    # seq 1-3 were dropped; a bound inside the dropped range still works.
+    page = small.page(after=2, limit=2)
+    assert texts(page.entries) == ["line 4", "line 5"] and page.before == 0
+    small.server.stop()
+
+
+def test_an_empty_page(fake):
+    client, _ = fake
+    numbered(client, 3)
+    page = client.logs.page(after=3)
+    assert page == LogPage(entries=[], total=3, before=3, after=0, first_seq=None, last_seq=None)
+    assert page.to_dict()["entries"] == []
+    with pytest.raises(ValueError):
+        client.logs.page(limit=-1)
+
+
+def test_match_is_a_case_insensitive_substring_or_a_pattern(fake):
+    client, _ = fake
+    for text in ("Flash loader started", "Erasing FLASH", "Done"):
+        post(client, text=text)
+    assert texts(client.logs.entries(match="flash")) == ["Flash loader started", "Erasing FLASH"]
+    assert texts(client.logs.entries(match=re.compile(r"^Er"))) == ["Erasing FLASH"]
+    assert client.logs.page(match="done").total == 1
+
+
+def test_filtering_keeps_the_detail_lines_of_a_kept_entry(fake):
+    client, _ = fake
+    post(client, text="Building main.c")
+    post(client, text="  compiler detail", isSubEntry=True)
+    post(client, text="Error[Pe020]: identifier undefined", severity=LogSeverity.ERROR)
+    post(client, text='  "x" at main.c(12)', isSubEntry=True)
+    post(client, text="  while compiling f()", isSubEntry=True)
+    post(client, text="Done")
+
+    page = client.logs.page(min_severity="warning")
+    assert texts(page.entries) == ["Error[Pe020]: identifier undefined", '  "x" at main.c(12)', "  while compiling f()"]
+    assert page.total == 3
+    # Detail lines count towards the limit like any entry.
+    assert texts(client.logs.entries(min_severity="warning", limit=2)) == ['  "x" at main.c(12)', "  while compiling f()"]
+    assert texts(client.logs.entries(match="Pe020")) == texts(page.entries)
+    assert texts(client.logs.problems()) == texts(page.entries)
+
+
+def test_a_sub_entry_can_match_on_its_own(fake):
+    client, _ = fake
+    post(client, text="Building")
+    post(client, text="  main.c(12)", isSubEntry=True)
+    assert texts(client.logs.entries(match="main.c")) == ["  main.c(12)"]
+
+
+def test_detail_lines_stay_with_their_own_category(fake):
+    client, _ = fake
+    post(client, category="Log_Build", text="error", severity=LogSeverity.ERROR)
+    post(client, category="Log_Debug", text="debug detail", isSubEntry=True)
+    post(client, category="Log_Build", text="build detail", isSubEntry=True)
+    assert texts(client.logs.entries(min_severity="error")) == ["error", "build detail"]
+
+
+def test_summary_counts_per_category(fake):
+    client, _ = fake
+    handler = client.logs.server.handler
+    handler.addCategory("Log_Build")
+    post(client, category="Log_Build", text="old", severity=LogSeverity.ERROR)
+    handler.startSession("Log_Build")
+    for severity in (LogSeverity.ERROR, LogSeverity.ALERT, LogSeverity.SUPER, LogSeverity.WARNING, LogSeverity.INFO):
+        post(client, category="Log_Build", text=severity.name, severity=severity)
+    post(client, category="Log_Debug", text="d")
+
+    summary = client.logs.summary()
+    assert summary.mark == 7
+    build, debug = summary.categories
+    assert (build.name, build.open, build.session, build.entries) == ("Log_Build", True, 1, 6)
+    assert (build.errors, build.warnings, build.last_seq) == (3, 1, 6)
+    assert (debug.name, debug.open, debug.entries, debug.errors, debug.last_seq) == ("Log_Debug", False, 1, 0, 7)
+    assert summary.to_dict()["categories"][0]["errors"] == 3
+
+    client.logs.clear()
+    assert client.logs.summary().categories[0].last_seq is None
+
+
 def test_subscribe_and_wait_for(fake):
     client, _ = fake
     seen: list[str] = []
@@ -187,7 +326,7 @@ def test_subscribe_and_wait_for(fake):
     timer.start()
     found = client.logs.wait_for(lambda e: "finished" in e.text, after=mark, timeout=5)
     timer.join()
-    assert found is not None and found.text == "Build finished"
+    assert found is not None and found.text == "Build finished" and found.seq == mark + 1
 
 
 def test_session_caches_do_not_clear_the_logs(fake):

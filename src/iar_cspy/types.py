@@ -441,6 +441,9 @@ class LogEntry(_Result):
     message); entries stay a flat list in the order they were logged.
     ``session`` counts the times the IDE restarted this category's log (a new
     build, say) before the entry arrived: 0 until the first restart.
+    ``seq`` is the entry's position in the stream of all categories, as
+    :meth:`~iar_cspy.logs.Logs.mark` counts it: stable, increasing, and the
+    value to page from (``after=``/``before=``).
     """
 
     category: str
@@ -456,9 +459,61 @@ class LogEntry(_Result):
     entry_id: int
     is_sub_entry: bool
     session: int
+    seq: int
 
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
         out["severity"] = self.severity.name
         out["timestamp"] = None if self.timestamp is None else self.timestamp.isoformat()
         return out
+
+
+@dataclass
+class LogPage(_Result):
+    """One page of log entries, from :meth:`~iar_cspy.logs.Logs.page`.
+
+    ``total`` counts every entry matching the filters, ignoring the page
+    bounds (``after``/``before``/``limit``); ``before`` and ``after`` count
+    the matching entries older and newer than this page. ``first_seq`` and
+    ``last_seq`` are the ``seq`` of the page's ends, None when it is empty:
+    pass ``before=page.first_seq`` for the page before it, or
+    ``after=page.last_seq`` for the one after.
+    """
+
+    entries: list[LogEntry]
+    total: int
+    before: int
+    after: int
+    first_seq: int | None
+    last_seq: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        out["entries"] = [entry.to_dict() for entry in self.entries]
+        return out
+
+
+@dataclass
+class LogCategorySummary(_Result):
+    """One category in :class:`LogSummary`.
+
+    ``entries`` counts what is stored; ``errors`` (ERROR, ALERT, SUPER) and
+    ``warnings`` count the current session's stored entries. ``last_seq``
+    is the newest stored entry's ``seq``, None when nothing is stored.
+    """
+
+    name: str
+    open: bool
+    session: int
+    entries: int
+    errors: int
+    warnings: int
+    last_seq: int | None
+
+
+@dataclass
+class LogSummary(_Result):
+    """What ``client.logs`` holds, per category, and the stream position ``mark``."""
+
+    mark: int
+    categories: list[LogCategorySummary]

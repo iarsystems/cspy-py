@@ -199,10 +199,19 @@ id: `Log_Build`, `Log_Debug`, `Log_Tool_Output`, `Log_Find_in_Files`, ...
 ```python
 mark = client.logs.mark()
 client.project.build()
-for entry in client.logs.problems("Log_Build", since=mark):   # warnings and worse
+for entry in client.logs.problems("Log_Build", after=mark):   # warnings and worse, with their detail lines
     print(f"{entry.path}:{entry.line}: {entry.severity.name}: {entry.text}")
 
 print(client.logs.text("Log_Build", session="current"))       # the last build, as the Build window shows it
+```
+
+Long logs are read in pages. Page bounds are `seq` positions, not offsets,
+so they stay valid while the log grows and old entries are dropped:
+
+```python
+page = client.logs.page("Log_Debug", match="flash", limit=50)  # the newest 50 matching
+while page.before:                                             # older matching entries remain
+    page = client.logs.page("Log_Debug", match="flash", before=page.first_seq, limit=50)
 ```
 
 Past entries are not replayed by the IDE, so the client starts listening as

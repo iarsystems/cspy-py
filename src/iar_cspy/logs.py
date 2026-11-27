@@ -22,9 +22,11 @@ installation ships the library.
 
 from __future__ import annotations
 
+import bisect
 import itertools
 import logging
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -36,7 +38,7 @@ from ._callbacks import CallbackServer
 from ._process import is_reachable
 from .errors import CSpyError
 from .ide_services import LOG_FORWARDER, resolve_manifest
-from .types import LogEntry, LogSeverity
+from .types import LogCategorySummary, LogEntry, LogPage, LogSeverity, LogSummary
 
 if TYPE_CHECKING:
     from .client import Client
@@ -59,6 +61,8 @@ SEVERITY_PREFIXES = {
 }
 
 Session = int | Literal["current"] | None
+Severity = LogSeverity | str | int
+Match = str | re.Pattern[str]
 LogListener = Callable[[LogEntry], None]
 
 _instance_numbers = itertools.count(1)
@@ -80,7 +84,7 @@ def _position(pos: Any) -> tuple[int | None, int | None]:
     return int(getattr(pos, "row", 0) or 0), int(getattr(pos, "col", 0) or 0)
 
 
-def _entry_from_thrift(entry: Any, session: int) -> LogEntry:
+def _entry_from_thrift(entry: Any, session: int, seq: int) -> LogEntry:
     try:
         severity = LogSeverity(int(getattr(entry, "severity", LogSeverity.INFO)))
     except (TypeError, ValueError):
@@ -103,12 +107,25 @@ def _entry_from_thrift(entry: Any, session: int) -> LogEntry:
         entry_id=int(getattr(entry, "entryId", 0) or 0),
         is_sub_entry=bool(getattr(entry, "isSubEntry", False)),
         session=session,
+        seq=seq,
     )
+
+
+def _matcher(match: Match | None) -> Callable[[str], bool] | None:
+    if match is None:
+        return None
+    if isinstance(match, re.Pattern):
+        return lambda text: match.search(text) is not None
+    needle = str(match).casefold()
+    return lambda text: needle in text.casefold()
+
+
+_ERRORS = (LogSeverity.ERROR, LogSeverity.ALERT, LogSeverity.SUPER)
 
 
 @dataclass
 class _Category:
-    entries: deque[tuple[int, LogEntry]]
+    entries: deque[LogEntry]
     session: int = 0
     #: Whether the IDE has the category now (addCategory, not yet removeCategory).
     open: bool = False
@@ -148,7 +165,7 @@ class Logs:
 
         mark = client.logs.mark()
         client.project.build(...)
-        for entry in client.logs.problems("Log_Build", since=mark):
+        for entry in client.logs.problems("Log_Build", after=mark):
             print(entry.path, entry.line, entry.text)
 
     ``session="current"`` narrows a category to what was logged since the
@@ -186,71 +203,174 @@ class Logs:
         with self._lock:
             return [name for name, category in self._categories.items() if category.open]
 
-    def entries(
+    def page(
         self,
         category: str | None = None,
         *,
         session: Session = None,
-        since: int | None = None,
-        min_severity: LogSeverity | str | int | None = None,
-    ) -> list[LogEntry]:
-        """Stored entries, oldest first; of one category, or of all of them.
+        min_severity: Severity | None = None,
+        match: Match | None = None,
+        after: int | None = None,
+        before: int | None = None,
+        limit: int | None = None,
+    ) -> LogPage:
+        """A page of stored entries, oldest first; of one category, or of all of them.
 
-        ``session`` is a session number (see :attr:`LogEntry.session`) or
-        ``"current"``, each category's latest. ``since`` is a :meth:`mark`:
-        only entries that arrived after it. ``min_severity`` drops less
-        serious entries; it takes a :class:`LogSeverity`, its name or value.
-        Filtering on severity can leave sub-entries without the entry they
-        continue.
+        Filters:
+
+        - ``session``: a session number (see :attr:`LogEntry.session`) or
+          ``"current"``, each category's latest.
+        - ``min_severity``: drop less serious entries; a :class:`LogSeverity`,
+          its name or value.
+        - ``match``: on the entry's text; a string is a case-insensitive
+          substring, a compiled pattern is ``search``-ed.
+
+        An entry kept by ``min_severity``/``match`` keeps the sub-entries
+        that directly follow it (its detail lines, usually less severe).
+
+        Page bounds are ``seq`` positions (:attr:`LogEntry.seq`,
+        :meth:`mark`), which stay valid as the log grows and old entries
+        are dropped:
+
+        - ``after``: entries with ``seq > after``, the first ``limit`` of them;
+        - ``before``: entries with ``seq < before``, the last ``limit`` of them;
+        - neither: the newest ``limit``. ``limit=None`` is no limit.
+
+        With both ``after`` and ``before``, the first ``limit`` between them.
         """
         floor = None if min_severity is None else _severity(min_severity)
+        matches = _matcher(match)
+        filtered = floor is not None or matches is not None
+        if limit is not None and limit < 0:
+            raise ValueError(f"limit must be >= 0, not {limit}")
+
+        def wanted(entry: LogEntry) -> bool:
+            return (floor is None or entry.severity >= floor) and (matches is None or matches(entry.text))
+
         with self._lock:
             if category is None:
                 selected = list(self._categories.values())
             else:
                 one = self._categories.get(category)
                 selected = [] if one is None else [one]
-            found: list[tuple[int, LogEntry]] = []
+            found: list[LogEntry] = []
             for stored in selected:
-                wanted = stored.session if session == "current" else session
-                for seq, entry in stored.entries:
-                    if since is not None and seq <= since:
+                number = stored.session if session == "current" else session
+                parent_kept = False
+                for entry in stored.entries:
+                    if number is not None and entry.session != number:
                         continue
-                    if wanted is not None and entry.session != wanted:
-                        continue
-                    if floor is not None and entry.severity < floor:
-                        continue
-                    found.append((seq, entry))
-        found.sort(key=lambda item: item[0])
-        return [entry for _, entry in found]
+                    if entry.is_sub_entry:
+                        keep = not filtered or parent_kept or wanted(entry)
+                    else:
+                        keep = parent_kept = not filtered or wanted(entry)
+                    if keep:
+                        found.append(entry)
+        if len(selected) > 1:
+            found.sort(key=lambda entry: entry.seq)
+
+        seqs = [entry.seq for entry in found]
+        lo = 0 if after is None else bisect.bisect_right(seqs, after)
+        hi = len(found) if before is None else bisect.bisect_left(seqs, before)
+        hi = max(lo, hi)
+        if limit is not None:
+            if after is not None:
+                hi = min(hi, lo + limit)  # the first `limit` after the mark
+            else:
+                lo = max(lo, hi - limit)  # the last `limit` before `before`, or the tail
+        entries = found[lo:hi]
+        return LogPage(
+            entries=entries,
+            total=len(found),
+            before=lo,
+            after=len(found) - hi,
+            first_seq=entries[0].seq if entries else None,
+            last_seq=entries[-1].seq if entries else None,
+        )
+
+    def entries(
+        self,
+        category: str | None = None,
+        *,
+        session: Session = None,
+        min_severity: Severity | None = None,
+        match: Match | None = None,
+        after: int | None = None,
+        before: int | None = None,
+        limit: int | None = None,
+    ) -> list[LogEntry]:
+        """The entries of :meth:`page`, without the counts."""
+        return self.page(
+            category, session=session, min_severity=min_severity, match=match, after=after, before=before, limit=limit
+        ).entries
 
     def problems(
-        self, category: str | None = None, *, session: Session = "current", since: int | None = None
+        self,
+        category: str | None = None,
+        *,
+        session: Session = "current",
+        match: Match | None = None,
+        after: int | None = None,
+        before: int | None = None,
+        limit: int | None = None,
     ) -> list[LogEntry]:
-        """Warnings and worse, by default of each category's current session."""
-        return self.entries(category, session=session, since=since, min_severity=LogSeverity.WARNING)
+        """Warnings and worse with their detail lines, by default of each category's current session."""
+        return self.entries(
+            category,
+            session=session,
+            min_severity=LogSeverity.WARNING,
+            match=match,
+            after=after,
+            before=before,
+            limit=limit,
+        )
 
     def text(
         self,
         category: str | None = None,
         *,
         session: Session = None,
-        since: int | None = None,
-        min_severity: LogSeverity | str | int | None = None,
+        min_severity: Severity | None = None,
+        match: Match | None = None,
+        after: int | None = None,
+        before: int | None = None,
+        limit: int | None = None,
     ) -> str:
-        """The entries :meth:`entries` selects, as text, one line per entry.
+        """The entries :meth:`page` selects, as text, one line per entry.
 
         Warnings and errors get a ``Warning:``/``Error:`` prefix, sub-entries
         are indented. Without ``category``, each line starts with its
         category in brackets.
         """
         lines = []
-        for entry in self.entries(category, session=session, since=since, min_severity=min_severity):
+        selected = self.entries(
+            category, session=session, min_severity=min_severity, match=match, after=after, before=before, limit=limit
+        )
+        for entry in selected:
             prefix = "  " if entry.is_sub_entry else ""
             prefix += "" if category is not None else f"[{entry.category}] "
             prefix += SEVERITY_PREFIXES.get(entry.severity, "")
             lines.append(prefix + entry.text.rstrip("\n"))
         return "\n".join(lines)
+
+    def summary(self) -> LogSummary:
+        """Per category: whether the IDE has it open, its current session, and what is stored."""
+        with self._lock:
+            categories = []
+            for name, stored in self._categories.items():
+                current = [entry for entry in stored.entries if entry.session == stored.session]
+                categories.append(
+                    LogCategorySummary(
+                        name=name,
+                        open=stored.open,
+                        session=stored.session,
+                        entries=len(stored.entries),
+                        errors=sum(1 for entry in current if entry.severity in _ERRORS),
+                        warnings=sum(1 for entry in current if entry.severity == LogSeverity.WARNING),
+                        last_seq=stored.entries[-1].seq if stored.entries else None,
+                    )
+                )
+            return LogSummary(mark=self._seq, categories=categories)
 
     def clear(self, category: str | None = None) -> None:
         """Forget the stored entries of ``category``, or of every category.
@@ -266,7 +386,7 @@ class Logs:
     # -- following ----------------------------------------------------------------
 
     def mark(self) -> int:
-        """A position in the stream of entries, for ``since=`` and :meth:`wait_for`."""
+        """The ``seq`` of the newest entry so far (0 before any): for ``after=`` and :meth:`wait_for`."""
         with self._lock:
             return self._seq
 
@@ -290,13 +410,13 @@ class Logs:
         with self._posted:
             while True:
                 found = [
-                    (seq, entry)
+                    entry
                     for stored in self._categories.values()
-                    for seq, entry in stored.entries
-                    if seq > after and predicate(entry)
+                    for entry in stored.entries
+                    if entry.seq > after and predicate(entry)
                 ]
                 if found:
-                    return min(found, key=lambda item: item[0])[1]
+                    return min(found, key=lambda entry: entry.seq)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
@@ -432,9 +552,9 @@ class Logs:
         with self._posted:
             name = str(getattr(raw, "category", "") or "")
             stored = self._category(name)
-            entry = _entry_from_thrift(raw, stored.session)
             self._seq += 1
-            stored.entries.append((self._seq, entry))
+            entry = _entry_from_thrift(raw, stored.session, self._seq)
+            stored.entries.append(entry)
             self._posted.notify_all()
             listeners = list(self._listeners)
         for listener in listeners:
