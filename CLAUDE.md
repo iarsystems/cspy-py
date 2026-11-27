@@ -31,6 +31,15 @@ import `mcp` or `iar_cspy_mcp` (enforced by `tests/test_package.py`).
 - `breakpoints.py`, `context.py`, `memory.py`, `source.py`, `terminal.py`,
   `events.py`, `listwindow.py`, `project.py`, `options.py`, `ide_services.py`:
   one module per service area.
+- `logs.py`: `client.logs`, the IDE's logs (`Log_Build`, `Log_Debug`, ...)
+  from the platform's log forwarder, stored per category for reading back.
+  Registers as early as possible, since past entries are not replayed: as
+  `LOGSERVICE_ID` when that is free (the 10.1.1 forwarder delivers to that
+  name only), else under a suffixed name (newer forwarders deliver to
+  `LOGSERVICE_ID.<suffix>` too, so never both). Loads the forwarder into a
+  managed IarServiceLauncher. Also stores the debugger's log events from
+  `client.events` as category `CSpy_Debug` (`DEBUGGER_LOG`), so the Debug
+  Log can be read the same way with or without an IDE.
 - `frontend.py`: the headless stand-in for the IDE's `frontend` service
   (message boxes, dialogs, alias lookups): declines by default, records
   every prompt, and attaches a failing call's prompts to its error.

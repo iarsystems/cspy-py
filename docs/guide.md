@@ -190,6 +190,44 @@ finally:
 Project and option calls need the IDE services, which a managed backend from a
 full IAR installation provides; see [ide-services.md](ide-services.md).
 
+### Read the IDE's logs
+
+`client.logs` holds what the IDE logged since the client started listening,
+with severities and source positions. Each log is a category with the IDE's
+id: `Log_Build`, `Log_Debug`, `Log_Tool_Output`, `Log_Find_in_Files`, ...
+
+```python
+mark = client.logs.mark()
+client.project.build()
+for entry in client.logs.problems("Log_Build", after=mark):   # warnings and errors, with their detail lines
+    print(f"{entry.path}:{entry.line}: {entry.severity.name}: {entry.text}")
+
+print(client.logs.text("Log_Build", session="current"))       # the last build, as the Build window shows it
+```
+
+Long logs are read in pages. Page bounds are `seq` positions, not offsets,
+so they stay valid while the log grows and old entries are dropped:
+
+```python
+page = client.logs.page("Log_Debug", match="flash", limit=50)  # the newest 50 matching
+while page.before:                                             # older matching entries remain
+    page = client.logs.page("Log_Debug", match="flash", before=page.first_seq, limit=50)
+```
+
+Past entries are not replayed by the IDE, so the client starts listening as
+early as it can: before its first project or options call, and on
+configure/start (`client.logs.ensure_registered()` does it by hand). The logs
+come from the IDE platform's log forwarder: a Thrift-enabled iaride runs one
+while remote control is on, and a managed backend loads one into its
+IarServiceLauncher when the installation ships it. CSpyServer2 alone has none.
+
+The debugger's own log is there too, as category `CSpy_Debug`
+(`iar_cspy.logs.DEBUGGER_LOG`): the log events CSpyServer2 posts to this
+client, so it fills whenever this client receives the debug events, a managed
+backend included, where the IDE's `Log_Debug` does not exist. Each
+`debugger.configure()` starts a new session of it. With an IDE running the
+session, `Log_Debug` has the same lines and `CSpy_Debug` may have none.
+
 ### Attach to an IDE's session
 
 ```python

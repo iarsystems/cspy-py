@@ -10,6 +10,7 @@ readable names, context references, and the results of multi-step operations.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from enum import Enum, IntEnum
 from typing import Any
 
@@ -47,6 +48,28 @@ class CRunBreakAction(IntEnum):
     STOP_AND_LOG = 0
     LOG = 1
     IGNORE = 2
+
+
+class LogSeverity(IntEnum):
+    """How an IDE log entry is shown (``logservice.LogSeverity``).
+
+    The values rank how prominently the IDE shows a line, not how bad it
+    is: only ``WARNING`` and ``ERROR`` are problems. ``ALERT`` is urgent
+    text that is shown at once (the build's "Resolving dependencies..."),
+    and ``SUPER`` a line shown above the rest ("Build succeeded", the
+    warning count, find-in-files hits). So ``severity >= WARNING`` also
+    picks those; filter on ``{WARNING, ERROR}`` (``Logs.problems()``,
+    ``severities=PROBLEM_SEVERITIES``) for the problems.
+    """
+
+    DEBUG = -1
+    USER = 0
+    MINOR_INFO = 1
+    INFO = 2
+    WARNING = 3
+    ERROR = 4
+    ALERT = 5
+    SUPER = 6
 
 
 class CodeBreakpointMode(str, Enum):
@@ -410,3 +433,92 @@ class CRunEvent(_Result):
             "message": None if self.message is None else self.message.to_dict(),
             "index": self.index,
         }
+
+
+@dataclass
+class LogEntry(_Result):
+    """One entry of an IDE log (``logservice.LogEntry``), as ``client.logs`` stores it.
+
+    ``category`` is the IDE's id of the log it belongs to (``Log_Build``,
+    ``Log_Debug``, ``Log_Tool_Output``, ...). ``path``, ``line``/``column`` and ``end_line``/``end_column``
+    are None where the IDE gave no source position. ``is_sub_entry`` marks an
+    entry that continues the one before it (the detail lines of a build
+    message); entries stay a flat list in the order they were logged.
+    ``session`` counts the times the IDE restarted this category's log (a new
+    build, say) before the entry arrived: 0 until the first restart.
+    ``seq`` is the entry's position in the stream of all categories, as
+    :meth:`~iar_cspy.logs.Logs.mark` counts it: stable, increasing, and the
+    value to page from (``after=``/``before=``).
+    """
+
+    category: str
+    text: str
+    severity: LogSeverity
+    sender: str
+    path: str | None
+    line: int | None
+    column: int | None
+    end_line: int | None
+    end_column: int | None
+    timestamp: datetime | None
+    entry_id: int
+    is_sub_entry: bool
+    session: int
+    seq: int
+
+    def to_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        out["severity"] = self.severity.name
+        out["timestamp"] = None if self.timestamp is None else self.timestamp.isoformat()
+        return out
+
+
+@dataclass
+class LogPage(_Result):
+    """One page of log entries, from :meth:`~iar_cspy.logs.Logs.page`.
+
+    ``total`` counts every entry matching the filters, ignoring the page
+    bounds (``after``/``before``/``limit``); ``before`` and ``after`` count
+    the matching entries older and newer than this page. ``first_seq`` and
+    ``last_seq`` are the ``seq`` of the page's ends, None when it is empty:
+    pass ``before=page.first_seq`` for the page before it, or
+    ``after=page.last_seq`` for the one after.
+    """
+
+    entries: list[LogEntry]
+    total: int
+    before: int
+    after: int
+    first_seq: int | None
+    last_seq: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        out["entries"] = [entry.to_dict() for entry in self.entries]
+        return out
+
+
+@dataclass
+class LogCategorySummary(_Result):
+    """One category in :class:`LogSummary`.
+
+    ``entries`` counts what is stored; ``errors`` (ERROR) and ``warnings``
+    (WARNING) count the current session's stored entries. ``last_seq``
+    is the newest stored entry's ``seq``, None when nothing is stored.
+    """
+
+    name: str
+    open: bool
+    session: int
+    entries: int
+    errors: int
+    warnings: int
+    last_seq: int | None
+
+
+@dataclass
+class LogSummary(_Result):
+    """What ``client.logs`` holds, per category, and the stream position ``mark``."""
+
+    mark: int
+    categories: list[LogCategorySummary]
